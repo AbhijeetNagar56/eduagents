@@ -1,0 +1,42 @@
+eduagents/
+├── README.md                  # What/why, quick start, links to docs
+├── docs/
+│   ├── architecture.md        # System diagram + components + data flows
+│   ├── design.md              # Key decisions and why (DB schema, RLS, queue)
+│   ├── phases.md              # Roadmap: what's done / next
+│   ├── api.md                 # Endpoints and request/response shapes
+│   ├── ai-pipeline.md         # Gemini steps, prompts, JSON schema
+│   ├── decisions/             # Short ADRs, e.g. 001-cron-instead-of-worker.md
+│   └── assets/
+│       └── architecture.html  # Your uploaded interactive diagram
+├── frontend/                  # Next.js (Vercel)
+│   ├── app/
+│   │   ├── student/           # Submit + track status
+│   │   └── faculty/           # Rubrics, review, override, export
+│   ├── components/
+│   ├── lib/                   # Supabase client, realtime hooks
+│   └── package.json
+├── backend/                   # FastAPI (Render/Fly.io)
+│   ├── app/
+│   │   ├── main.py
+│   │   ├── routers/           # uploads.py, grades.py, internal_jobs.py
+│   │   ├── services/          # storage.py, queue.py
+│   │   ├── ai/                # extract.py (Flash-Lite), grade.py (Flash), prompts/
+│   │   ├── models/            # Pydantic schemas
+│   │   └── core/              # config, auth, logging
+│   ├── tests/
+│   ├── requirements.txt
+│   └── .env.example
+├── supabase/
+│   ├── migrations/            # Tables: submissions, rubrics, grading_jobs, grades
+│   ├── policies/              # RLS rules
+│   └── seed.sql
+├── .github/
+│   ├── workflows/
+│   │   ├── process-jobs.yml   # Cron every 2 min → POST /internal/process-jobs
+│   │   ├── ci.yml             # Lint + tests
+│   │   └── deploy.yml
+│   └── pull_request_template.md
+├── CONTRIBUTING.md
+├── CHANGELOG.md
+└── .gitignore

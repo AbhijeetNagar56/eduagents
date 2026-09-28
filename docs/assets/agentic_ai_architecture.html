@@ -1,0 +1,882 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>EduAgents - System Architecture</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Font Awesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['Inter', 'sans-serif'],
+                        mono: ['JetBrains Mono', 'monospace'],
+                    },
+                    colors: {
+                        upload: { DEFAULT: '#2563eb', light: '#dbeafe', border: '#93c5fd' }, // Blue
+                        process: { DEFAULT: '#ea580c', light: '#ffedd5', border: '#fdba74' }, // Orange
+                        sync: { DEFAULT: '#059669', light: '#d1fae5', border: '#6ee7b7' }, // Green
+                    }
+                }
+            }
+        }
+    </script>
+
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            user-select: none;
+        }
+
+        /* SVG Flow Animation CSS */
+        @keyframes dash {
+            to {
+                stroke-dashoffset: -40;
+            }
+        }
+
+        .flow-path {
+            stroke-dasharray: 8 6;
+            animation: dash 1.5s linear infinite;
+        }
+
+        .flow-path-inactive {
+            stroke-dasharray: none;
+            animation: none;
+            opacity: 0.35;
+        }
+
+        .component-card {
+            transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+            cursor: pointer;
+        }
+
+        .component-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.08), 0 8px 10px -6px rgba(0, 0, 0, 0.04);
+        }
+
+        .component-card.selected {
+            border: 2px solid rgba(59, 130, 246, 0.75);
+            box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.5);
+        }
+
+        /* Slide projection mode styles */
+        .presentation-fullscreen {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            z-index: 9999;
+            background: #f8fafc;
+        }
+
+        .dark .presentation-fullscreen {
+            background: #0f172a;
+        }
+
+        /* Custom scrollbar */
+        ::-webkit-scrollbar {
+            width: 6px;
+            height: 6px;
+        }
+        ::-webkit-scrollbar-track {
+            background: transparent;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #cbd5e1;
+            border-radius: 9999px;
+        }
+        .dark ::webkit-scrollbar-thumb {
+            background: #475569;
+        }
+    </style>
+</head>
+<body class="bg-slate-50 dark:bg-slate-900 text-slate-800 dark:text-slate-100 min-h-screen flex flex-col transition-colors duration-200">
+
+    <!-- Top Header Navigation -->
+    <header class="bg-white dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700 px-6 py-3.5 flex flex-wrap items-center justify-between gap-4 sticky top-0 z-40 shadow-sm">
+        <div class="flex items-center space-x-3">
+            <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-blue-600 to-indigo-700 flex items-center justify-center text-white shadow-md shadow-blue-500/20">
+                <i class="fa-solid fa-diagram-project text-lg"></i>
+            </div>
+            <div>
+                <div class="flex items-center space-x-2">
+                    <h1 class="font-bold text-slate-900 dark:text-white text-lg tracking-tight">Human-AI Co-Learning Agent</h1>
+                    <span class="text-xs font-semibold px-2.5 py-0.5 rounded-full bg-blue-50 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300 border border-blue-200 dark:border-blue-800">Review Edition</span>
+                </div>
+                <p class="text-xs text-slate-500 dark:text-slate-400">High-level architectural overview</p>
+            </div>
+        </div>
+
+        <!-- Controls Toolbar -->
+        <div class="flex items-center space-x-2 sm:space-x-3">
+            <!-- Flow Filters -->
+            <div class="bg-slate-100 dark:bg-slate-700/60 p-1 rounded-xl flex items-center text-xs font-medium space-x-1 border border-slate-200 dark:border-slate-600">
+                <button id="filter-all" onclick="setFlowFilter('all')" class="flow-btn px-3 py-1.5 rounded-lg bg-white dark:bg-slate-800 text-slate-900 dark:text-white shadow-sm font-semibold transition">
+                    All Flows
+                </button>
+                <button id="filter-upload" onclick="setFlowFilter('upload')" class="flow-btn px-3 py-1.5 rounded-lg text-slate-600 dark:text-slate-300 hover:text-blue-600 transition flex items-center gap-1.5">
+                    <span class="w-2 h-2 rounded-full bg-blue-600"></span> Upload
+                </button>
+                <button id="filter-process" onclick="setFlowFilter('process')" class="flow-btn px-3 py-1.5 rounded-lg text-slate-600 dark:text-slate-300 hover:text-orange-600 transition flex items-center gap-1.5">
+                    <span class="w-2 h-2 rounded-full bg-orange-500"></span> Processing
+                </button>
+                <button id="filter-sync" onclick="setFlowFilter('sync')" class="flow-btn px-3 py-1.5 rounded-lg text-slate-600 dark:text-slate-300 hover:text-emerald-600 transition flex items-center gap-1.5">
+                    <span class="w-2 h-2 rounded-full bg-emerald-500"></span> Real-time
+                </button>
+            </div>
+
+            <div class="h-5 w-px bg-slate-300 dark:bg-slate-700"></div>
+
+            <!-- Presentation Walkthrough Toggle -->
+            <button onclick="togglePresentationMode()" class="px-3.5 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-medium text-xs flex items-center gap-2 shadow-sm transition">
+                <i class="fa-solid fa-person-chalkboard"></i>
+                <span>Step by Step</span>
+            </button>
+
+            <!-- Export Dropdown -->
+            <button onclick="exportDiagramSVG()" title="Export Diagram" class="p-2 rounded-xl text-slate-600 hover:text-slate-900 dark:text-slate-300 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-700 transition">
+                <i class="fa-solid fa-download"></i>
+            </button>
+
+            <!-- Theme Toggle -->
+            <button onclick="toggleTheme()" class="p-2 rounded-xl text-slate-600 hover:text-slate-900 dark:text-slate-300 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-700 transition">
+                <i class="fa-solid fa-moon dark:hidden"></i>
+                <i class="fa-solid fa-sun hidden dark:block"></i>
+            </button>
+        </div>
+    </header>
+
+    <!-- Presentation Control Bar (Visible in Presentation Mode) -->
+    <div id="presentation-bar" class="hidden bg-indigo-900 text-white px-6 py-2.5 flex items-center justify-between border-b border-indigo-800 shadow-inner">
+        <div class="flex items-center space-x-3">
+            <span class="text-xs font-bold uppercase tracking-wider text-indigo-300 flex items-center gap-2">
+                <i class="fa-solid fa-sliders text-indigo-400"></i> Walkthrough:
+            </span>
+            <span id="step-indicator" class="text-sm font-semibold text-white">Step 1 of 5: Student Submission</span>
+        </div>
+        
+        <div class="flex items-center space-x-3">
+            <button onclick="prevStep()" class="px-3 py-1 rounded bg-indigo-800 hover:bg-indigo-700 text-xs font-medium transition flex items-center gap-1">
+                <i class="fa-solid fa-chevron-left text-[10px]"></i> Previous
+            </button>
+            <div id="step-dots" class="flex items-center space-x-1.5">
+                <!-- Dots generated via JS -->
+            </div>
+            <button onclick="nextStep()" class="px-3 py-1 rounded bg-indigo-600 hover:bg-indigo-500 text-xs font-medium transition flex items-center gap-1">
+                Next <i class="fa-solid fa-chevron-right text-[10px]"></i>
+            </button>
+            <button onclick="exitPresentationMode()" class="ml-4 text-xs text-indigo-300 hover:text-white underline">
+                Exit Walkthrough
+            </button>
+        </div>
+    </div>
+
+    <!-- Main Content Container -->
+    <main class="flex-1 flex flex-col xl:flex-row overflow-hidden relative">
+        
+        <!-- Left / Center: Interactive Diagram Screen -->
+        <div id="diagram-container" class="flex-1 relative overflow-auto p-4 md:p-8 flex items-center justify-center min-h-[720px] bg-slate-100/50 dark:bg-slate-900/50">
+            
+            <!-- Floating Interactive Legend -->
+            <div class="absolute top-6 left-6 z-10 bg-white/90 dark:bg-slate-800/90 backdrop-blur-md p-3.5 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-lg max-w-xs text-xs space-y-2">
+                <div class="font-bold text-slate-800 dark:text-slate-100 flex items-center justify-between">
+                    <span>Data Flow Paths</span>
+                    <i class="fa-solid fa-route text-slate-400"></i>
+                </div>
+                <div class="space-y-1.5">
+                    <div onclick="setFlowFilter('upload')" class="flex items-center space-x-2.5 p-1 rounded hover:bg-slate-100 dark:hover:bg-slate-700/50 cursor-pointer">
+                        <span class="w-3 h-1.5 rounded-full bg-blue-600"></span>
+                        <span class="text-slate-700 dark:text-slate-300 font-medium">Upload Flow (Blue)</span>
+                    </div>
+                    <div onclick="setFlowFilter('process')" class="flex items-center space-x-2.5 p-1 rounded hover:bg-slate-100 dark:hover:bg-slate-700/50 cursor-pointer">
+                        <span class="w-3 h-1.5 rounded-full bg-orange-500"></span>
+                        <span class="text-slate-700 dark:text-slate-300 font-medium">Processing Flow (Orange)</span>
+                    </div>
+                    <div onclick="setFlowFilter('sync')" class="flex items-center space-x-2.5 p-1 rounded hover:bg-slate-100 dark:hover:bg-slate-700/50 cursor-pointer">
+                        <span class="w-3 h-1.5 rounded-full bg-emerald-500"></span>
+                        <span class="text-slate-700 dark:text-slate-300 font-medium">Real-time Sync (Green)</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Canvas Container -->
+            <div id="architecture-canvas" class="relative w-full max-w-[1240px] bg-white dark:bg-slate-800/90 rounded-3xl border border-slate-200 dark:border-slate-700/80 shadow-2xl p-6 md:p-8 my-auto">
+                
+                <!-- SVG Diagram Connector Layer -->
+                <svg id="svg-connectors" class="absolute inset-0 w-full h-full pointer-events-none z-0" xmlns="http://www.w3.org/2000/svg">
+                    <defs>
+                        <!-- Arrow Markers -->
+                        <marker id="arrow-blue" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                            <path d="M 0 0 L 10 5 L 0 10 z" fill="#2563eb" />
+                        </marker>
+                        <marker id="arrow-orange" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                            <path d="M 0 0 L 10 5 L 0 10 z" fill="#ea580c" />
+                        </marker>
+                        <marker id="arrow-green" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                            <path d="M 0 0 L 10 5 L 0 10 z" fill="#059669" />
+                        </marker>
+                        
+                        <!-- Gradient definitions -->
+                        <linearGradient id="grad-blue" x1="0%" y1="0%" x2="100%" y2="100%">
+                            <stop offset="0%" stop-color="#3b82f6" />
+                            <stop offset="100%" stop-color="#1d4ed8" />
+                        </linearGradient>
+                    </defs>
+
+                    <!-- Connections defined via dynamic path calculations -->
+                    <!-- Path 1: Student Portal -> Backend API (Upload Flow) -->
+                    <path id="path-student-backend" data-flow="upload" class="flow-path transition-all duration-300" d="M 230 145 L 390 230" stroke="#2563eb" stroke-width="2.5" fill="none" marker-end="url(#arrow-blue)" />
+                    
+                    <!-- Path 2: Faculty Portal -> Backend API (View / Grades) -->
+                    <path id="path-faculty-backend" data-flow="sync" class="flow-path transition-all duration-300" d="M 750 145 L 610 230" stroke="#059669" stroke-width="2" stroke-dasharray="4 4" fill="none" marker-end="url(#arrow-green)" />
+
+                    <!-- Path 3: Backend API -> Supabase Storage & DB (Upload & Job Insert) -->
+                    <path id="path-backend-db" data-flow="upload" class="flow-path transition-all duration-300" d="M 430 330 L 300 395" stroke="#2563eb" stroke-width="2.5" fill="none" marker-end="url(#arrow-blue)" />
+
+                    <!-- Path 4: GitHub Cron -> Backend Process Jobs Endpoint (Processing Flow) -->
+                    <path id="path-cron-backend" data-flow="process" class="flow-path transition-all duration-300" d="M 730 400 C 680 400, 620 380, 580 330" stroke="#ea580c" stroke-width="2.5" fill="none" marker-end="url(#arrow-orange)" />
+
+                    <!-- Path 5: Backend API -> AI Evaluation Pipeline (Job Processing) -->
+                    <path id="path-backend-ai" data-flow="process" class="flow-path transition-all duration-300" d="M 500 330 L 500 535" stroke="#ea580c" stroke-width="2.5" fill="none" marker-end="url(#arrow-orange)" />
+
+                    <!-- Path 6: AI Pipeline -> Gemini Flash Grading -->
+                    <path id="path-lite-flash" data-flow="process" class="flow-path transition-all duration-300" d="M 430 600 L 520 600" stroke="#ea580c" stroke-width="2.5" fill="none" marker-end="url(#arrow-orange)" />
+
+                    <!-- Path 7: Gemini Flash -> Update DB (Write Grades & Status) -->
+                    <path id="path-ai-db" data-flow="process" class="flow-path transition-all duration-300" d="M 520 625 C 380 640, 260 550, 260 495" stroke="#ea580c" stroke-width="2.5" fill="none" marker-end="url(#arrow-orange)" />
+
+                    <!-- Path 8: Supabase Realtime Channel -> Faculty & Student Portals (Live Sync) -->
+                    <path id="path-realtime-faculty" data-flow="sync" class="flow-path transition-all duration-300" d="M 920 320 C 920 180, 850 110, 800 110" stroke="#059669" stroke-width="2.5" fill="none" marker-end="url(#arrow-green)" />
+                    <path id="path-realtime-student" data-flow="sync" class="flow-path transition-all duration-300" d="M 920 320 C 920 60, 280 60, 200 80" stroke="#059669" stroke-width="2.5" fill="none" marker-end="url(#arrow-green)" />
+                    <path id="path-db-realtime" data-flow="sync" class="flow-path transition-all duration-300" d="M 370 440 C 600 460, 910 440, 910 390" stroke="#059669" stroke-width="2" stroke-dasharray="4 4" fill="none" marker-end="url(#arrow-green)" />
+                </svg>
+
+                <!-- Architecture Grid Content Layout -->
+                <div class="relative z-10 grid grid-cols-12 gap-y-10 gap-x-6">
+
+                    <!-- TOP ROW: Portals -->
+                    
+                    <!-- 1. Student Portal (top-left) -->
+                    <div class="col-span-12 md:col-span-5 flex justify-center md:justify-start">
+                        <div id="node-student" onclick="selectComponent('student')" class="component-card group w-full max-w-md bg-gradient-to-br from-blue-50/90 to-indigo-50/50 dark:from-slate-800 dark:to-slate-800/90 border-2 border-blue-200 dark:border-blue-900/60 rounded-2xl p-4 shadow-sm hover:border-blue-400">
+                            <div class="flex items-center justify-between mb-2">
+                                <div class="flex items-center space-x-2.5">
+                                    <div class="w-8 h-8 rounded-lg bg-blue-600 text-white flex items-center justify-center font-bold text-sm shadow-sm">
+                                        <i class="fa-solid fa-user-graduate"></i>
+                                    </div>
+                                    <div>
+                                        <h3 class="font-bold text-slate-900 dark:text-white text-sm">Student Portal</h3>
+                                        <p class="text-[11px] text-slate-500 dark:text-slate-400 font-mono">Next.js Frontend</p>
+                                    </div>
+                                </div>
+                                <span class="text-[10px] uppercase tracking-wider font-semibold px-2 py-0.5 rounded bg-blue-100 dark:bg-blue-950/80 text-blue-700 dark:text-blue-300">Web App</span>
+                            </div>
+                            
+                            <div class="mt-3 bg-white dark:bg-slate-900/80 rounded-xl p-2.5 border border-blue-100 dark:border-slate-700/60 flex items-center justify-between text-xs">
+                                <span class="font-medium text-slate-700 dark:text-slate-300 flex items-center gap-2">
+                                    <i class="fa-solid fa-cloud-arrow-up text-blue-500"></i> Action: 'Submit Assignment'
+                                </span>
+                                <span class="text-[10px] text-slate-400 bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded font-mono">PDF / MD</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Spacer / Middle Gap -->
+                    <div class="col-span-12 md:col-span-2 hidden md:flex items-center justify-center text-slate-300 dark:text-slate-700">
+                        <div class="text-center text-xs font-mono font-medium">HTTP / REST</div>
+                    </div>
+
+                    <!-- 2. Faculty Portal (top-right) -->
+                    <div class="col-span-12 md:col-span-5 flex justify-center md:justify-end">
+                        <div id="node-faculty" onclick="selectComponent('faculty')" class="component-card group w-full max-w-md bg-gradient-to-br from-emerald-50/90 to-teal-50/50 dark:from-slate-800 dark:to-slate-800/90 border-2 border-emerald-200 dark:border-emerald-900/60 rounded-2xl p-4 shadow-sm hover:border-emerald-400">
+                            <div class="flex items-center justify-between mb-2">
+                                <div class="flex items-center space-x-2.5">
+                                    <div class="w-8 h-8 rounded-lg bg-emerald-600 text-white flex items-center justify-center font-bold text-sm shadow-sm">
+                                        <i class="fa-solid fa-chalkboard-user"></i>
+                                    </div>
+                                    <div>
+                                        <h3 class="font-bold text-slate-900 dark:text-white text-sm">Faculty Portal</h3>
+                                        <p class="text-[11px] text-slate-500 dark:text-slate-400 font-mono">Next.js Frontend</p>
+                                    </div>
+                                </div>
+                                <span class="text-[10px] uppercase tracking-wider font-semibold px-2 py-0.5 rounded bg-emerald-100 dark:bg-emerald-950/80 text-emerald-700 dark:text-emerald-300">Instructor Dashboard</span>
+                            </div>
+
+                            <div class="mt-3 bg-white dark:bg-slate-900/80 rounded-xl p-2.5 border border-emerald-100 dark:border-slate-700/60 flex items-center justify-between text-xs">
+                                <span class="font-medium text-slate-700 dark:text-slate-300 flex items-center gap-2">
+                                    <i class="fa-solid fa-square-poll-vertical text-emerald-500"></i> 'View Grades / Review Submissions'
+                                </span>
+                                <span class="text-[10px] text-slate-400 bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded font-mono">Real-time</span>
+                            </div>
+                        </div>
+                    </div>
+
+
+                    <!-- CENTER ROW: Backend API & Storage & Scheduled Jobs & Real-time -->
+
+                    <!-- 3. Storage & Database (center-left) -->
+                    <div class="col-span-12 md:col-span-4">
+                        <div id="node-db" onclick="selectComponent('db')" class="component-card h-full bg-slate-50 dark:bg-slate-800/90 border-2 border-slate-200 dark:border-slate-700 rounded-2xl p-4 shadow-sm hover:border-slate-400 flex flex-col justify-between">
+                            <div>
+                                <div class="flex items-center justify-between mb-2">
+                                    <div class="flex items-center space-x-2">
+                                        <div class="w-7 h-7 rounded-lg bg-emerald-700 text-white flex items-center justify-center text-xs font-bold">
+                                            <i class="fa-solid fa-database"></i>
+                                        </div>
+                                        <div>
+                                            <h4 class="font-bold text-slate-900 dark:text-white text-xs">Storage & Database</h4>
+                                            <p class="text-[10px] text-slate-500 dark:text-slate-400">Supabase Postgres + Storage</p>
+                                        </div>
+                                    </div>
+                                </div>
+                                <p class="text-[11px] text-slate-600 dark:text-slate-300 mb-3">Holds submissions, evaluation grades, and job queue status.</p>
+                            </div>
+
+                            <!-- RLS Tag -->
+                            <div class="mt-2 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800/60 rounded-xl p-2">
+                                <div class="flex items-start space-x-2">
+                                    <i class="fa-solid fa-shield-halved text-emerald-600 dark:text-emerald-400 text-xs mt-0.5"></i>
+                                    <div>
+                                        <div class="text-[10px] font-bold text-emerald-900 dark:text-emerald-300">Row-Level Security (RLS)</div>
+                                        <div class="text-[10px] text-emerald-700 dark:text-emerald-400 leading-tight">Student sees own data, Faculty sees all class submissions.</div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 4. Backend API Layer (center) -->
+                    <div class="col-span-12 md:col-span-4">
+                        <div id="node-backend" onclick="selectComponent('backend')" class="component-card bg-gradient-to-br from-indigo-50 to-blue-50/60 dark:from-slate-800 dark:to-indigo-950/40 border-2 border-indigo-200 dark:border-indigo-800 rounded-2xl p-4 shadow-md hover:border-indigo-400 relative">
+                            <div class="flex items-center justify-between mb-2">
+                                <div class="flex items-center space-x-2.5">
+                                    <div class="w-8 h-8 rounded-lg bg-indigo-600 text-white flex items-center justify-center text-sm font-bold shadow-sm">
+                                        <i class="fa-solid fa-server"></i>
+                                    </div>
+                                    <div>
+                                        <h3 class="font-bold text-slate-900 dark:text-white text-sm">Backend API Layer</h3>
+                                        <p class="text-[11px] text-indigo-600 dark:text-indigo-300 font-mono">FastAPI Service</p>
+                                    </div>
+                                </div>
+                                <span class="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse" title="Service Active"></span>
+                            </div>
+
+                            <ul class="text-[11px] text-slate-600 dark:text-slate-300 space-y-1.5 my-3 pl-1">
+                                <li class="flex items-center gap-1.5">
+                                    <i class="fa-solid fa-check text-indigo-500 text-[10px]"></i> Receives assignment uploads
+                                </li>
+                                <li class="flex items-center gap-1.5">
+                                    <i class="fa-solid fa-check text-indigo-500 text-[10px]"></i> Writes raw files to Storage bucket
+                                </li>
+                                <li class="flex items-center gap-1.5">
+                                    <i class="fa-solid fa-check text-indigo-500 text-[10px]"></i> Inserts record into Job Queue table
+                                </li>
+                            </ul>
+
+                            <!-- Job Queue Tag -->
+                            <div class="bg-white dark:bg-slate-900 rounded-xl p-2 border border-indigo-100 dark:border-slate-700/80">
+                                <div class="text-[10px] font-mono text-slate-500 dark:text-slate-400 mb-1 font-semibold">Job Queue State:</div>
+                                <div class="flex items-center justify-between text-[11px] font-mono font-bold text-slate-700 dark:text-slate-200">
+                                    <span class="text-amber-600 dark:text-amber-400">pending</span>
+                                    <i class="fa-solid fa-arrow-right text-[10px] text-slate-400"></i>
+                                    <span class="text-blue-600 dark:text-blue-400">processing</span>
+                                    <i class="fa-solid fa-arrow-right text-[10px] text-slate-400"></i>
+                                    <span class="text-emerald-600 dark:text-emerald-400">done</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 5. Scheduled Job Runner (center-right) -->
+                    <div class="col-span-12 md:col-span-3">
+                        <div id="node-cron" onclick="selectComponent('cron')" class="component-card h-full bg-orange-50/60 dark:bg-slate-800/90 border-2 border-orange-200 dark:border-orange-900/60 rounded-2xl p-4 shadow-sm hover:border-orange-400 flex flex-col justify-between">
+                            <div>
+                                <div class="flex items-center space-x-2 mb-2">
+                                    <div class="w-7 h-7 rounded-lg bg-orange-600 text-white flex items-center justify-center text-xs font-bold">
+                                        <i class="fa-solid fa-clock-rotate-left"></i>
+                                    </div>
+                                    <div>
+                                        <h4 class="font-bold text-slate-900 dark:text-white text-xs">Scheduled Job Runner</h4>
+                                        <p class="text-[10px] text-orange-700 dark:text-orange-400 font-mono">GitHub Actions Cron</p>
+                                    </div>
+                                </div>
+                                <p class="text-[11px] text-slate-600 dark:text-slate-300">Triggers every 2 minutes via automated runner.</p>
+                            </div>
+
+                            <div class="mt-3 bg-white dark:bg-slate-900 rounded-xl p-2 border border-orange-200/80 dark:border-slate-700 text-[10px] font-mono">
+                                <div class="text-orange-600 dark:text-orange-400 font-bold mb-0.5"><i class="fa-solid fa-terminal mr-1"></i> Cron Trigger:</div>
+                                <div class="text-slate-600 dark:text-slate-300 truncate">POST /internal/process-jobs</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 6. Real-time Sync Layer (Right side thin band) -->
+                    <div class="col-span-12 md:col-span-1 flex md:flex-col items-center justify-center">
+                        <div id="node-realtime" onclick="selectComponent('realtime')" class="component-card w-full h-full bg-emerald-500/10 dark:bg-emerald-950/30 border-2 border-emerald-300 dark:border-emerald-700/60 rounded-2xl p-2.5 flex md:flex-col items-center justify-between text-center hover:border-emerald-500">
+                            <div class="w-7 h-7 rounded-full bg-emerald-600 text-white flex items-center justify-center text-xs font-bold my-1">
+                                <i class="fa-solid fa-bolt"></i>
+                            </div>
+                            <div class="writing-mode-vertical hidden md:block text-[11px] font-bold text-emerald-800 dark:text-emerald-300 uppercase tracking-widest my-auto py-2">
+                                Real-Time Sync Channel
+                            </div>
+                            <div class="md:hidden text-xs font-bold text-emerald-800 dark:text-emerald-300">
+                                Real-Time Sync Layer
+                            </div>
+                            <div class="text-[9px] font-mono bg-emerald-100 dark:bg-emerald-900 text-emerald-800 dark:text-emerald-200 px-1.5 py-0.5 rounded-full">
+                                Supabase
+                            </div>
+                        </div>
+                    </div>
+
+
+                    <!-- BOTTOM ROW: AI Evaluation Pipeline -->
+
+                    <!-- 7. AI Evaluation Layer (Bottom span) -->
+                    <div class="col-span-12">
+                        <div id="node-ai" onclick="selectComponent('ai')" class="component-card bg-gradient-to-r from-purple-50 via-indigo-50 to-purple-50 dark:from-slate-800 dark:via-indigo-950/40 dark:to-slate-800 border-2 border-indigo-200 dark:border-indigo-800/80 rounded-2xl p-5 shadow-md hover:border-indigo-400">
+                            
+                            <div class="flex flex-wrap items-center justify-between gap-2 mb-4 border-b border-indigo-100 dark:border-slate-700/80 pb-3">
+                                <div class="flex items-center space-x-3">
+                                    <div class="w-9 h-9 rounded-xl bg-gradient-to-tr from-purple-600 to-indigo-600 text-white flex items-center justify-center text-base font-bold shadow-sm">
+                                        <i class="fa-solid fa-wand-magic-sparkles"></i>
+                                    </div>
+                                    <div>
+                                        <h3 class="font-bold text-slate-900 dark:text-white text-base">AI Evaluation Layer</h3>
+                                        <p class="text-xs text-indigo-600 dark:text-indigo-300 font-medium">Two-Step Sequential Grading & Reasoning Pipeline</p>
+                                    </div>
+                                </div>
+                                <span class="text-xs font-semibold px-3 py-1 rounded-full bg-purple-100 dark:bg-purple-950/80 text-purple-700 dark:text-purple-300 border border-purple-200 dark:border-purple-800">
+                                    Google Gemini AI Engines
+                                </span>
+                            </div>
+
+                            <!-- Two Step Pipeline Boxes -->
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                
+                                <!-- Step 1: Gemini Flash-Lite -->
+                                <div class="bg-white dark:bg-slate-900/90 rounded-xl p-3.5 border border-purple-100 dark:border-slate-700 flex items-start space-x-3 shadow-sm">
+                                    <div class="w-7 h-7 rounded-lg bg-indigo-100 dark:bg-indigo-900/60 text-indigo-700 dark:text-indigo-300 flex items-center justify-center font-bold text-xs shrink-0">
+                                        1
+                                    </div>
+                                    <div class="flex-1">
+                                        <div class="flex items-center justify-between">
+                                            <h4 class="font-bold text-slate-900 dark:text-white text-xs">Gemini Flash-Lite</h4>
+                                            <span class="text-[10px] text-slate-400 font-mono">Fast & Lightweight</span>
+                                        </div>
+                                        <p class="text-[11px] text-slate-600 dark:text-slate-300 mt-0.5 font-medium">Extraction & Structure Check</p>
+                                        <p class="text-[10px] text-slate-400 dark:text-slate-500 mt-1">Parses submitted text, checks rubrics compliance, converts layout to structured JSON schema.</p>
+                                    </div>
+                                </div>
+
+                                <!-- Step 2: Gemini Flash -->
+                                <div class="bg-white dark:bg-slate-900/90 rounded-xl p-3.5 border border-purple-100 dark:border-slate-700 flex items-start space-x-3 shadow-sm">
+                                    <div class="w-7 h-7 rounded-lg bg-purple-100 dark:bg-purple-900/60 text-purple-700 dark:text-purple-300 flex items-center justify-center font-bold text-xs shrink-0">
+                                        2
+                                    </div>
+                                    <div class="flex-1">
+                                        <div class="flex items-center justify-between">
+                                            <h4 class="font-bold text-slate-900 dark:text-white text-xs">Gemini Flash</h4>
+                                            <span class="text-[10px] text-slate-400 font-mono">Advanced Reasoning</span>
+                                        </div>
+                                        <p class="text-[11px] text-slate-600 dark:text-slate-300 mt-0.5 font-medium">Grading & Feedback Reasoning</p>
+                                        <p class="text-[10px] text-slate-400 dark:text-slate-500 mt-1">Evaluates quality, computes score break-down, generates detailed constructivist constructive feedback.</p>
+                                    </div>
+                                </div>
+
+                            </div>
+                        </div>
+                    </div>
+
+                </div>
+
+                <!-- DEPLOYMENT FOOTER STRIP (bottom strip, small icons, de-emphasized) -->
+                <div class="mt-8 pt-4 border-t border-slate-200 dark:border-slate-700/60 flex flex-wrap items-center justify-between gap-4 text-slate-400 dark:text-slate-500 text-xs">
+                    <div class="flex items-center space-x-2">
+                        <i class="fa-solid fa-server text-slate-400"></i>
+                        <span class="font-semibold text-slate-500 dark:text-slate-400">Deployment Infrastructure:</span>
+                    </div>
+
+                    <div class="flex items-center space-x-6">
+                        <!-- Vercel -->
+                        <div class="flex items-center space-x-1.5 hover:text-slate-700 dark:hover:text-slate-300 transition" title="Frontend Hosting">
+                            <svg class="w-3.5 h-3.5 fill-current" viewBox="0 0 512 512"><path d="M256 48L512 464H0L256 48Z"/></svg>
+                            <span class="text-[11px] font-medium">Vercel (Frontend)</span>
+                        </div>
+
+                        <!-- Render / Fly.io -->
+                        <div class="flex items-center space-x-1.5 hover:text-slate-700 dark:hover:text-slate-300 transition" title="Backend Compute">
+                            <i class="fa-solid fa-cloud text-xs"></i>
+                            <span class="text-[11px] font-medium">Render / Fly.io (Backend API)</span>
+                        </div>
+
+                        <!-- GitHub -->
+                        <div class="flex items-center space-x-1.5 hover:text-slate-700 dark:hover:text-slate-300 transition" title="CI/CD & Job Automation">
+                            <i class="fa-brands fa-github text-xs"></i>
+                            <span class="text-[11px] font-medium">GitHub Actions (CI/CD & Automation)</span>
+                        </div>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+
+        <!-- Right Drawer: Component Details & Presentation Notes -->
+        <aside id="inspector-drawer" class="w-full xl:w-96 bg-white dark:bg-slate-800 border-t xl:border-t-0 xl:border-l border-slate-200 dark:border-slate-700 p-6 flex flex-col justify-between overflow-y-auto shrink-0 shadow-lg transition-all duration-300">
+            <div>
+                <div class="flex items-center justify-between pb-4 border-b border-slate-200 dark:border-slate-700">
+                    <div class="flex items-center space-x-2">
+                        <span id="inspector-icon" class="w-7 h-7 rounded-lg bg-blue-600 text-white flex items-center justify-center text-xs">
+                            <i class="fa-solid fa-circle-info"></i>
+                        </span>
+                        <h2 id="inspector-title" class="font-bold text-slate-900 dark:text-white text-base">Select a Component</h2>
+                    </div>
+                    <span id="inspector-badge" class="text-[10px] font-mono uppercase font-semibold px-2 py-0.5 rounded bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300">
+                        Overview
+                    </span>
+                </div>
+
+                <!-- Dynamic Content Section -->
+                <div id="inspector-body" class="mt-4 space-y-4 text-xs text-slate-600 dark:text-slate-300">
+                    <p class="text-slate-500 dark:text-slate-400">Click on any module in the system diagram to view its technical details, security guarantees, data flow paths, and faculty discussion notes.</p>
+                    
+                    <div class="bg-blue-50 dark:bg-slate-700/50 p-3 rounded-xl border border-blue-100 dark:border-slate-600">
+                        <h4 class="font-bold text-blue-900 dark:text-blue-200 mb-1 flex items-center gap-1.5">
+                            <i class="fa-solid fa-lightbulb text-amber-500"></i> Faculty Key Takeaways
+                        </h4>
+                        <ul class="list-disc list-inside space-y-1 text-slate-700 dark:text-slate-300">
+                            <li>Decoupled API prevents timeout errors during peak assignment submission deadlines.</li>
+                            <li>Two-stage AI process ensures high grading consistency and structured schema safety.</li>
+                            <li>Real-time updates notify faculty the moment scores are ready.</li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Faculty Q&A Quick Reference -->
+            <div class="mt-6 pt-4 border-t border-slate-200 dark:border-slate-700">
+                <div class="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-2">FAQ</div>
+                <details class="group py-1 cursor-pointer">
+                    <summary class="font-semibold text-xs text-slate-700 dark:text-slate-200 group-hover:text-blue-600 flex justify-between items-center">
+                        Is student data secure?
+                        <i class="fa-solid fa-chevron-down text-[10px] group-open:rotate-180 transition"></i>
+                    </summary>
+                    <p class="mt-1 text-[11px] text-slate-500 dark:text-slate-400 pl-2 border-l-2 border-blue-400">Yes. Row-Level Security (RLS) policies at the database layer prevent students from accessing peers' assignments.</p>
+                </details>
+                <details class="group py-1 cursor-pointer">
+                    <summary class="font-semibold text-xs text-slate-700 dark:text-slate-200 group-hover:text-blue-600 flex justify-between items-center">
+                        What if API limits are hit?
+                        <i class="fa-solid fa-chevron-down text-[10px] group-open:rotate-180 transition"></i>
+                    </summary>
+                    <p class="mt-1 text-[11px] text-slate-500 dark:text-slate-400 pl-2 border-l-2 border-orange-400">The job queue table safely stores submissions as 'pending' and retries them automatically without losing student work.</p>
+                </details>
+            </div>
+        </aside>
+
+    </main>
+
+    <!-- JavaScript Application Logic -->
+    <script>
+        // Component Detail Database for Inspector
+        const componentDetails = {
+            student: {
+                title: "Student Portal",
+                badge: "Next.js App",
+                icon: "fa-solid fa-user-graduate",
+                iconBg: "bg-blue-600",
+                description: "Lightweight, responsive web portal built with Next.js allowing students to drag-and-drop submit assignments (PDF/Markdown) and track evaluation status live.",
+                points: [
+                    "Action: 'Submit Assignment' sends payloads to FastAPI.",
+                    "Listens to Supabase Realtime for live feedback alerts.",
+                    "Restricted view enforcement via Supabase Auth RLS."
+                ],
+                flow: "Upload Flow (Initiator) & Real-time Listener"
+            },
+            faculty: {
+                title: "Faculty Portal",
+                badge: "Instructor Deck",
+                icon: "fa-solid fa-chalkboard-user",
+                iconBg: "bg-emerald-600",
+                description: "Comprehensive instructor view for setting up grading rubrics, reviewing automated evaluations, overriding AI scores, and exporting class reports.",
+                points: [
+                    "Action: 'View Grades / Review Submissions'.",
+                    "Receives instant push notifications as AI completes evaluation jobs.",
+                    "Full read permissions across all class roster submissions."
+                ],
+                flow: "Real-time Sync Subscriber"
+            },
+            backend: {
+                title: "Backend API Layer",
+                badge: "FastAPI Engine",
+                icon: "fa-solid fa-server",
+                iconBg: "bg-indigo-600",
+                description: "High-performance Python FastAPI microservice that handles student uploads, writes raw files to blob storage, and manages the transactional job queue.",
+                points: [
+                    "Validates file types and sizes before queuing.",
+                    "Exposes '/internal/process-jobs' cron endpoint.",
+                    "Ensures zero web request blocking during heavy LLM grading tasks."
+                ],
+                flow: "Central Controller (Upload & Processing)"
+            },
+            db: {
+                title: "Storage & Database",
+                badge: "Supabase Postgres",
+                icon: "fa-solid fa-database",
+                iconBg: "bg-emerald-700",
+                description: "Unified database and object storage instance storing submission files, grading rubrics, AI generated feedback, and execution states.",
+                points: [
+                    "Supabase Postgres for metadata and grading_jobs table.",
+                    "Supabase Storage buckets for submission documents.",
+                    "Row-Level Security (RLS) tag enforces strict student data privacy."
+                ],
+                flow: "State & Data Persistence Layer"
+            },
+            cron: {
+                title: "Scheduled Job Runner",
+                badge: "GitHub Actions Cron",
+                icon: "fa-solid fa-clock-rotate-left",
+                iconBg: "bg-orange-600",
+                description: "Automated workflow runner configured to ping the backend every 2 minutes to drain pending grading jobs from the database queue.",
+                points: [
+                    "Calls POST /internal/process-jobs endpoint periodically.",
+                    "Guarantees asynchronous task execution without extra cloud server costs.",
+                    "Handles retries if API rate limits occur."
+                ],
+                flow: "Processing Flow Trigger"
+            },
+            ai: {
+                title: "AI Evaluation Layer",
+                badge: "Gemini Pipeline",
+                icon: "fa-solid fa-wand-magic-sparkles",
+                iconBg: "bg-purple-600",
+                description: "Two-step AI evaluation pipeline leveraging specialized Gemini models for structural validation and deep pedagogical reasoning.",
+                points: [
+                    "Step 1 (Gemini Flash-Lite): Extracts plain text, verifies rubric structure, outputs clean JSON schema.",
+                    "Step 2 (Gemini Flash): Grades against rubrics, calculates numerical scores, generates constructive feedback.",
+                    "Writes final grades directly back into Supabase Postgres database."
+                ],
+                flow: "AI Processing Core"
+            },
+            realtime: {
+                title: "Real-time Sync Layer",
+                badge: "Supabase WebSockets",
+                icon: "fa-solid fa-bolt",
+                iconBg: "bg-emerald-600",
+                description: "Event-driven WebSocket broadcast channel that pushes database state changes ('Grading…' -> 'Score Ready') directly to connected user browser sessions.",
+                points: [
+                    "Eliminates manual browser page refreshing.",
+                    "Instant updates on both Student and Faculty dashboards.",
+                    "Low bandwidth overhead."
+                ],
+                flow: "Live Notification Sync"
+            }
+        };
+
+        // Slide presentation steps for presentation walkthrough mode
+        const presentationSteps = [
+            {
+                component: "student",
+                indicator: "Step 1 of 5: Student Submission",
+                flowFilter: "upload"
+            },
+            {
+                component: "backend",
+                indicator: "Step 2 of 5: API Ingestion & Job Queuing",
+                flowFilter: "upload"
+            },
+            {
+                component: "cron",
+                indicator: "Step 3 of 5: Cron Trigger (Every 2 min)",
+                flowFilter: "process"
+            },
+            {
+                component: "ai",
+                indicator: "Step 4 of 5: Two-Step Gemini AI Pipeline",
+                flowFilter: "process"
+            },
+            {
+                component: "realtime",
+                indicator: "Step 5 of 5: Real-time Grade Sync to Portals",
+                flowFilter: "sync"
+            }
+        ];
+
+        let currentStepIndex = 0;
+        let isPresentationMode = false;
+
+        // Initialize state
+        document.addEventListener('DOMContentLoaded', () => {
+            selectComponent('student');
+            renderStepDots();
+            window.addEventListener('resize', drawDynamicConnectors);
+            drawDynamicConnectors();
+        });
+
+        // Toggle flow filter active classes
+        function setFlowFilter(filter) {
+            document.querySelectorAll('.flow-btn').forEach(btn => {
+                btn.classList.remove('bg-white', 'dark:bg-slate-800', 'shadow-sm', 'font-semibold');
+                btn.classList.add('text-slate-600', 'dark:text-slate-300');
+            });
+
+            const activeBtn = document.getElementById(`filter-${filter}`);
+            if (activeBtn) {
+                activeBtn.classList.add('bg-white', 'dark:bg-slate-800', 'shadow-sm', 'font-semibold');
+            }
+
+            const paths = document.querySelectorAll('.flow-path');
+            paths.forEach(path => {
+                const pathFlow = path.getAttribute('data-flow');
+                if (filter === 'all' || pathFlow === filter) {
+                    path.classList.remove('flow-path-inactive');
+                } else {
+                    path.classList.add('flow-path-inactive');
+                }
+            });
+        }
+
+        // Select component for detailed inspection
+        function selectComponent(key) {
+            const data = componentDetails[key];
+            if (!data) return;
+
+            // Highlight selected component card
+            document.querySelectorAll('.component-card').forEach(card => {
+                card.classList.remove('ring-2', 'ring-indigo-500', 'border-indigo-500');
+            });
+            const selectedElem = document.getElementById(`node-${key}`);
+            if (selectedElem) {
+                selectedElem.classList.add('ring-2', 'ring-indigo-500');
+            }
+
+            // Update Drawer HTML
+            document.getElementById('inspector-title').innerText = data.title;
+            document.getElementById('inspector-badge').innerText = data.badge;
+            document.getElementById('inspector-icon').className = `w-7 h-7 rounded-lg ${data.iconBg} text-white flex items-center justify-center text-xs`;
+            document.getElementById('inspector-icon').innerHTML = `<i class="${data.icon}"></i>`;
+
+            const pointsList = data.points.map(p => `<li class="flex items-start gap-1.5"><i class="fa-solid fa-chevron-right text-[9px] text-blue-500 mt-1"></i> <span>${p}</span></li>`).join('');
+
+            document.getElementById('inspector-body').innerHTML = `
+                <p class="text-slate-700 dark:text-slate-200 leading-relaxed">${data.description}</p>
+                
+                <div class="my-3">
+                    <div class="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">Key Responsibilities</div>
+                    <ul class="space-y-1.5 font-medium">
+                        ${pointsList}
+                    </ul>
+                </div>
+
+                <div class="bg-slate-50 dark:bg-slate-700/40 p-2.5 rounded-xl border border-slate-200 dark:border-slate-600">
+                    <span class="text-[10px] font-bold uppercase text-slate-400 block mb-0.5">Associated Data Flow:</span>
+                    <span class="font-semibold text-slate-800 dark:text-slate-200">${data.flow}</span>
+                </div>
+            `;
+        }
+
+        // Presentation Mode Logic
+        function togglePresentationMode() {
+            isPresentationMode = !isPresentationMode;
+            const presentationBar = document.getElementById('presentation-bar');
+            
+            if (isPresentationMode) {
+                presentationBar.classList.remove('hidden');
+                currentStepIndex = 0;
+                applyPresentationStep(currentStepIndex);
+            } else {
+                presentationBar.classList.add('hidden');
+                setFlowFilter('all');
+            }
+        }
+
+        function exitPresentationMode() {
+            isPresentationMode = false;
+            document.getElementById('presentation-bar').classList.add('hidden');
+            setFlowFilter('all');
+        }
+
+        function renderStepDots() {
+            const container = document.getElementById('step-dots');
+            container.innerHTML = presentationSteps.map((_, idx) => `
+                <div id="dot-${idx}" onclick="goToStep(${idx})" class="w-2 h-2 rounded-full cursor-pointer transition ${idx === 0 ? 'bg-indigo-300 w-4' : 'bg-indigo-700'}"></div>
+            `).join('');
+        }
+
+        function applyPresentationStep(index) {
+            const step = presentationSteps[index];
+            document.getElementById('step-indicator').innerText = step.indicator;
+            
+            // Update dots
+            presentationSteps.forEach((_, idx) => {
+                const dot = document.getElementById(`dot-${idx}`);
+                if (dot) {
+                    if (idx === index) {
+                        dot.className = "w-4 h-2 rounded-full bg-indigo-300 cursor-pointer transition";
+                    } else {
+                        dot.className = "w-2 h-2 rounded-full bg-indigo-700 cursor-pointer transition";
+                    }
+                }
+            });
+
+            setFlowFilter(step.flowFilter);
+            selectComponent(step.component);
+        }
+
+        function nextStep() {
+            if (currentStepIndex < presentationSteps.length - 1) {
+                currentStepIndex++;
+                applyPresentationStep(currentStepIndex);
+            }
+        }
+
+        function prevStep() {
+            if (currentStepIndex > 0) {
+                currentStepIndex--;
+                applyPresentationStep(currentStepIndex);
+            }
+        }
+
+        function goToStep(idx) {
+            currentStepIndex = idx;
+            applyPresentationStep(currentStepIndex);
+        }
+
+        // Theme Toggle
+        function toggleTheme() {
+            document.documentElement.classList.toggle('dark');
+        }
+
+        // Export SVG Diagram function
+        function exportDiagramSVG() {
+            const svgElement = document.getElementById('architecture-canvas').cloneNode(true);
+            const blob = new Blob([svgElement.outerHTML], { type: 'image/svg+xml;charset=utf-8' });
+            const url = URL.createObjectURL(blob);
+            const downloadLink = document.createElement('a');
+            downloadLink.href = url;
+            downloadLink.download = 'AI_Assessment_Platform_Architecture.html';
+            document.body.appendChild(downloadLink);
+            downloadLink.click();
+            document.body.removeChild(downloadLink);
+        }
+
+        // Dynamic Redraw Connector Pathing logic for recalculating responsive SVG paths
+        function drawDynamicConnectors() {
+            // Keep default SVG coordinates responsive to screen layout
+            const svg = document.getElementById('svg-connectors');
+            if (!svg) return;
+        }
+    </script>
+</body>
+</html>
