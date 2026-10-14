@@ -1,1 +1,15 @@
 .env
+.env.*
+!.env.example
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.coverage
+htmlcov/
+venv/
+.venv/
+node_modules/
+.next/
+dist/
+build/
