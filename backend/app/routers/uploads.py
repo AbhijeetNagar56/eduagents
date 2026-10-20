@@ -51,7 +51,8 @@ async def create_submission(
         id=sub_id,
         studentId=student_id,
         studentName=student_name,
-        studentEmail=student_email,
+        studentEmail=user.email,
+        ownerId=user.id,
         assignmentId=assignment_id,
         assignmentTitle=assignment_title,
         courseCode=course_code,
@@ -68,7 +69,7 @@ async def create_submission(
         override=None,
     )
 
-    Repository.save_submission(new_sub)
+    Repository.save_submission(new_sub, owner_id=user.id)
     QueueService.enqueue_submission(new_sub.id)
 
     return StandardResponse[Submission](
@@ -89,7 +90,7 @@ async def list_student_submissions(
     Returns submissions for the currently authenticated student.
     """
     # If the user is student, filter by student's ID or email
-    student_filter = user.id if user.role == "student" else None
+    student_filter = user.email if user.role == "student" else None
 
     subs, meta = Repository.get_submissions(
         course_code=course_code,
@@ -126,9 +127,12 @@ async def get_submission_detail(
         )
 
     # If student, ensure they own the submission
-    if user.role == "student" and user.id != sub.studentId and sub.studentEmail not in user.email:
-        # In dev mode, allow access for ease of testing
-        pass
+    if user.role == "student" and sub.studentEmail.lower() != user.email.lower():
+        raise APIException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            code="FORBIDDEN",
+            message="You can only view your own submissions.",
+        )
 
     return StandardResponse[Submission](
         success=True,

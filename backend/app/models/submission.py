@@ -11,6 +11,7 @@ class Submission(BaseModel):
     studentId: str = Field(..., alias="studentId")
     studentName: str = Field(..., alias="studentName")
     studentEmail: str = Field(..., alias="studentEmail")
+    ownerId: Optional[str] = Field(None, exclude=True)
     assignmentId: str = Field(..., alias="assignmentId")
     assignmentTitle: str = Field(..., alias="assignmentTitle")
     courseCode: str = Field(..., alias="courseCode")

@@ -8,6 +8,7 @@ from pydantic import BaseModel
 from app.core.config import settings
 from app.core.errors import APIException
 from app.core.logging import logger
+from app.services.supabase_client import get_supabase_client
 
 security_bearer = HTTPBearer(auto_error=False)
 
@@ -52,15 +53,31 @@ async def get_current_user(
     token = credentials.credentials
 
     # Fast path for local development / testing tokens
-    if token.startswith("mock-") or token.startswith("dev-"):
+    if settings.ENVIRONMENT == "development" and (token.startswith("mock-") or token.startswith("dev-")):
         role = "faculty" if "faculty" in token else "student"
         user_id = "FAC-101" if role == "faculty" else "STU-2024-302"
         email = f"{role}@eduagents.app"
         return AuthUser(id=user_id, email=email, role=role)
 
+    client = get_supabase_client()
+    if client:
+        try:
+            response = client.auth.get_user(token)
+            auth_user = response.user
+            if not auth_user:
+                raise ValueError("Supabase returned no user for this token")
+            metadata = auth_user.app_metadata or {}
+            role = metadata.get("role") or "student"
+            return AuthUser(id=str(auth_user.id), email=auth_user.email or "", role=role)
+        except Exception as e:
+            logger.warning(f"Supabase access-token verification failed: {e}")
+            raise APIException(status_code=401, code="UNAUTHORIZED", message="Invalid or expired access token.")
+
+    if settings.ENVIRONMENT != "development":
+        raise APIException(status_code=401, code="UNAUTHORIZED", message="Token verification is unavailable.")
+
     try:
-        # Decode Supabase JWT (unverified signature in dev or verified if secret present)
-        # Supabase uses HS256 with JWT Secret or RS256 with public key
+        # Development-only fallback when local Supabase credentials are not configured.
         claims = jwt.decode(
             token,
             options={"verify_signature": False},
@@ -69,8 +86,7 @@ async def get_current_user(
         user_id = claims.get("sub", "")
         email = claims.get("email", "")
         app_metadata = claims.get("app_metadata", {})
-        user_metadata = claims.get("user_metadata", {})
-        role = app_metadata.get("role") or user_metadata.get("role") or claims.get("role", "student")
+        role = app_metadata.get("role") or claims.get("role", "student")
 
         return AuthUser(id=user_id, email=email, role=role)
     except Exception as e:
@@ -91,7 +107,7 @@ async def get_current_user(
 
 def require_role(allowed_roles: List[str]):
     def role_checker(user: AuthUser = Depends(get_current_user)) -> AuthUser:
-        if user.role not in allowed_roles and "admin" not in user.role:
+        if user.role not in allowed_roles:
             raise APIException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 code="FORBIDDEN",

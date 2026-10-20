@@ -393,7 +393,7 @@ class Repository:
                 if course_code:
                     query = query.eq("course_code", course_code)
                 res = query.execute()
-                if res.data:
+                if res.data is not None:
                     rubrics = []
                     for row in res.data:
                         criteria = [
@@ -433,7 +433,9 @@ class Repository:
         if client:
             try:
                 res = client.table("rubrics").select("*, rubric_criteria(*)").eq("id", rubric_id).execute()
-                if res.data:
+                if res.data is not None:
+                    if not res.data:
+                        return None
                     row = res.data[0]
                     criteria = [
                         RubricCriterion(
@@ -514,6 +516,14 @@ class Repository:
                     "description": rubric.description,
                     "total_points": rubric.totalPoints,
                 }).eq("id", rubric_id).execute()
+                client.table("rubric_criteria").delete().eq("rubric_id", rubric_id).execute()
+                for i, criterion in enumerate(rubric.criteria):
+                    client.table("rubric_criteria").insert({
+                        "id": criterion.id, "rubric_id": rubric_id,
+                        "title": criterion.title, "description": criterion.description,
+                        "max_points": criterion.maxPoints, "weight_percent": criterion.weightPercent,
+                        "order_index": i,
+                    }).execute()
             except Exception as e:
                 logger.warning(f"Supabase update rubric failed: {e}")
 
@@ -541,7 +551,24 @@ class Repository:
         limit: int = 50,
         offset: int = 0,
     ) -> Tuple[List[Submission], Dict[str, Any]]:
+        client = get_supabase_client()
         subs = list(db.submissions.values())
+        if client:
+            try:
+                query = client.table("submissions_v2").select("*", count="exact").order("submitted_at", desc=True)
+                if course_code and course_code != "ALL": query = query.eq("course_code", course_code)
+                if status and status != "ALL" and status != "overridden": query = query.eq("status", status)
+                if student_id: query = query.eq("student_email", student_id)
+                if search and search.strip():
+                    term = search.strip().replace(",", " ")
+                    query = query.or_(f"student_name.ilike.%{term}%,student_id.ilike.%{term}%,assignment_title.ilike.%{term}%")
+                result = query.range(offset, offset + limit - 1).execute()
+                if result.data is not None:
+                    subs = [s for row in result.data if (s := Repository._submission_from_row(row)) is not None]
+                    for submission in subs:
+                        db.submissions[submission.id] = copy.deepcopy(submission)
+            except Exception as e:
+                logger.warning(f"Supabase submissions query failed, using in-memory store: {e}")
 
         # Filter by student_id
         if student_id:
@@ -586,7 +613,7 @@ class Repository:
 
         class_average = round(sum(evaluated_scores) / len(evaluated_scores), 1) if evaluated_scores else 0.0
 
-        paginated = subs[offset : offset + limit]
+        paginated = subs[offset : offset + limit] if not client else subs
 
         meta = {
             "total": total,
@@ -605,17 +632,66 @@ class Repository:
         client = get_supabase_client()
         if client:
             try:
-                res = client.table("submissions").select("*").eq("id", submission_id).execute()
-                if res.data:
-                    # In a full Supabase DB sync, parse the row.
-                    pass
+                res = client.table("submissions_v2").select("*").eq("id", submission_id).execute()
+                if res.data is not None:
+                    if not res.data:
+                        return None
+                    submission = Repository._submission_from_row(res.data[0])
+                    if submission:
+                        db.submissions[submission.id] = copy.deepcopy(submission)
+                        return submission
             except Exception as e:
                 logger.warning(f"Supabase get submission failed: {e}")
 
         return db.submissions.get(submission_id)
 
     @staticmethod
-    def save_submission(submission: Submission) -> Submission:
+    def _submission_from_row(row: Dict[str, Any]) -> Optional[Submission]:
+        try:
+            submission = Submission(
+                id=row["id"], studentId=row["student_id"], studentName=row["student_name"],
+                studentEmail=row["student_email"], assignmentId=row["assignment_id"],
+                assignmentTitle=row["assignment_title"], courseCode=row["course_code"],
+                fileName=row["file_name"], fileSize=row["file_size"], fileType=row["file_type"],
+                fileUrl=row.get("file_url"), contentPreview=row.get("content_preview"),
+                status=row.get("status", "pending"), processingStep=row.get("processing_step"),
+                rubricId=row.get("rubric_id") or "", submittedAt=str(row.get("submitted_at", "")),
+                ownerId=row.get("owner_id"),
+            )
+            client = get_supabase_client()
+            if client:
+                evaluation_rows = client.table("evaluations").select("*").eq("submission_id", submission.id).limit(1).execute().data or []
+                if evaluation_rows:
+                    ev = evaluation_rows[0]
+                    criteria = client.table("criterion_evaluations").select("*").eq("evaluation_id", ev["id"]).execute().data or []
+                    submission.evaluation = EvaluationResult(
+                        score=ev["score"], maxScore=ev["max_score"], percentage=ev["percentage"],
+                        summaryFeedback=ev.get("summary_feedback", ""), strengths=ev.get("strengths") or [],
+                        improvements=ev.get("improvements") or [], aiModelExtraction=ev.get("ai_model_extraction") or "",
+                        aiModelGrading=ev.get("ai_model_grading") or "", evaluatedAt=str(ev.get("evaluated_at", "")),
+                        criteriaScores=[{
+                            "criterionId": c["criterion_id"], "title": c.get("title") or "",
+                            "scoreAwarded": c["score_awarded"], "maxPoints": c["max_points"],
+                            "feedback": c.get("feedback") or "", "strengths": c.get("strengths"),
+                            "improvements": c.get("improvements"),
+                        } for c in criteria],
+                    )
+                override_rows = client.table("faculty_overrides").select("*").eq("submission_id", submission.id).order("overridden_at", desc=True).limit(1).execute().data or []
+                if override_rows:
+                    ov = override_rows[0]
+                    submission.override = FacultyOverride(
+                        isOverridden=ov["is_overridden"], originalScore=ov["original_score"],
+                        overriddenScore=ov["overridden_score"], overriddenBy=ov["overridden_by"],
+                        overrideReason=ov["override_reason"], overriddenAt=str(ov["overridden_at"]),
+                        criterionAdjustments=ov.get("criterion_adjustments"),
+                    )
+            return submission
+        except Exception as e:
+            logger.warning(f"Could not map Supabase submission row: {e}")
+            return None
+
+    @staticmethod
+    def save_submission(submission: Submission, owner_id: Optional[str] = None) -> Submission:
         db.submissions[submission.id] = copy.deepcopy(submission)
         client = get_supabase_client()
         if client:
@@ -635,9 +711,31 @@ class Repository:
                     "file_url": submission.fileUrl,
                     "rubric_id": submission.rubricId,
                     "status": submission.status.value,
+                    "processing_step": submission.processingStep.value if submission.processingStep else None,
+                    "content_preview": submission.contentPreview,
                     "submitted_at": submission.submittedAt,
                 }
-                client.table("submissions").upsert(row).execute()
+                if owner_id or submission.ownerId:
+                    row["owner_id"] = owner_id or submission.ownerId
+                client.table("submissions_v2").upsert(row).execute()
+                if submission.evaluation:
+                    evaluation = submission.evaluation
+                    evaluation_id = f"evaluation-{submission.id}"
+                    client.table("evaluations").upsert({
+                        "id": evaluation_id, "submission_id": submission.id, "score": evaluation.score,
+                        "max_score": evaluation.maxScore, "percentage": evaluation.percentage,
+                        "summary_feedback": evaluation.summaryFeedback, "strengths": evaluation.strengths,
+                        "improvements": evaluation.improvements, "ai_model_extraction": evaluation.aiModelExtraction,
+                        "ai_model_grading": evaluation.aiModelGrading, "evaluated_at": evaluation.evaluatedAt,
+                    }, on_conflict="submission_id").execute()
+                    client.table("criterion_evaluations").delete().eq("evaluation_id", evaluation_id).execute()
+                    for criterion in evaluation.criteriaScores:
+                        client.table("criterion_evaluations").insert({
+                            "evaluation_id": evaluation_id, "criterion_id": criterion.criterionId,
+                            "title": criterion.title, "score_awarded": criterion.scoreAwarded,
+                            "max_points": criterion.maxPoints, "feedback": criterion.feedback,
+                            "strengths": criterion.strengths, "improvements": criterion.improvements,
+                        }).execute()
             except Exception as e:
                 logger.warning(f"Supabase upsert submission failed: {e}")
 
@@ -677,6 +775,20 @@ class Repository:
 
     @staticmethod
     def get_pending_grading_jobs(limit: int = 10) -> List[GradingJob]:
+        client = get_supabase_client()
+        if client:
+            try:
+                rows = client.table("grading_jobs").select("*").eq("status", "pending").order("id").limit(limit).execute().data or []
+                jobs = [GradingJob(
+                    id=row["id"], submissionId=row["submission_id"], status=row["status"],
+                    retryCount=row.get("retry_count", 0), errorLog=row.get("error_log"),
+                    startedAt=str(row["started_at"]) if row.get("started_at") else None,
+                    completedAt=str(row["completed_at"]) if row.get("completed_at") else None,
+                ) for row in rows]
+                for job in jobs: db.grading_jobs[job.id] = copy.deepcopy(job)
+                return jobs
+            except Exception as e:
+                logger.warning(f"Supabase pending-job query failed, using in-memory store: {e}")
         pending = [j for j in db.grading_jobs.values() if j.status == JobStatus.PENDING]
         return pending[:limit]
 
@@ -690,6 +802,16 @@ class Repository:
     @staticmethod
     def save_job(job: GradingJob) -> GradingJob:
         db.grading_jobs[job.id] = copy.deepcopy(job)
+        client = get_supabase_client()
+        if client:
+            try:
+                client.table("grading_jobs").upsert({
+                    "id": job.id, "submission_id": job.submissionId, "status": job.status.value,
+                    "retry_count": job.retryCount, "error_log": job.errorLog,
+                    "started_at": job.startedAt, "completed_at": job.completedAt,
+                }).execute()
+            except Exception as e:
+                logger.warning(f"Supabase grading-job upsert failed: {e}")
         return job
 
     @staticmethod

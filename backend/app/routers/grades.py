@@ -10,8 +10,22 @@ from app.models.evaluation import FacultyOverride, FacultyOverrideRequest
 from app.models.rubric import Rubric, RubricCreate, RubricCriterion, RubricUpdate
 from app.models.submission import Submission
 from app.services.repository import Repository
+from app.services.queue import QueueService
 
 router = APIRouter(prefix="/api/v1/faculty", tags=["Faculty Operations"])
+
+
+@router.post("/process-jobs", response_model=StandardResponse[Dict[str, Any]])
+async def process_jobs_as_faculty(
+    user: AuthUser = Depends(require_role(["faculty", "admin"])),
+):
+    """Allow faculty to run a grading batch from the dashboard."""
+    result = await QueueService.process_batch()
+    return StandardResponse[Dict[str, Any]](
+        success=True,
+        data=result.model_dump(by_alias=True),
+        message="Batch completed successfully",
+    )
 
 
 @router.get("/submissions", response_model=PaginatedResponse[Submission])
@@ -21,7 +35,7 @@ async def list_faculty_submissions(
     search: Optional[str] = Query(None),
     limit: int = Query(50, ge=1, le=100),
     offset: int = Query(0, ge=0),
-    user: AuthUser = Depends(require_role(["faculty", "student"])),
+    user: AuthUser = Depends(require_role(["faculty", "admin"])),
 ):
     """
     Retrieves submissions across the roster with filtering by course, status, and search query.
@@ -46,7 +60,7 @@ async def list_faculty_submissions(
 async def override_submission_grade(
     id: str,
     override_req: FacultyOverrideRequest,
-    user: AuthUser = Depends(require_role(["faculty", "student"])),
+    user: AuthUser = Depends(require_role(["faculty", "admin"])),
 ):
     """
     Allows an instructor to override an AI evaluation score with an audit rationale.
@@ -104,7 +118,7 @@ async def list_rubrics(
 @router.post("/rubrics", status_code=status.HTTP_201_CREATED, response_model=StandardResponse[Rubric])
 async def create_rubric(
     rubric_in: RubricCreate,
-    user: AuthUser = Depends(require_role(["faculty", "student"])),
+    user: AuthUser = Depends(require_role(["faculty", "admin"])),
 ):
     """
     Creates a new grading rubric with associated weighted criteria.
@@ -113,7 +127,7 @@ async def create_rubric(
 
     criteria = [
         RubricCriterion(
-            id=f"crit-{i+1}",
+            id=f"{rubric_id}-crit-{i+1}",
             title=c.title,
             description=c.description,
             maxPoints=c.maxPoints,
@@ -147,7 +161,7 @@ async def create_rubric(
 async def update_rubric(
     id: str,
     rubric_update: RubricUpdate,
-    user: AuthUser = Depends(require_role(["faculty", "student"])),
+    user: AuthUser = Depends(require_role(["faculty", "admin"])),
 ):
     """
     Updates rubric metadata or criteria distributions.
@@ -170,7 +184,7 @@ async def update_rubric(
 @router.delete("/rubrics/{id}", response_model=StandardResponse[Dict[str, str]])
 async def delete_rubric(
     id: str,
-    user: AuthUser = Depends(require_role(["faculty", "student"])),
+    user: AuthUser = Depends(require_role(["faculty", "admin"])),
 ):
     """
     Deletes a rubric.

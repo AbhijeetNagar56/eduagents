@@ -89,7 +89,7 @@ class StorageService:
 
             # Upload to Supabase Storage if configured
             client = get_supabase_client()
-            file_url = f"https://supabase.co/storage/v1/object/public/{settings.STORAGE_BUCKET_NAME}/{storage_key}"
+            file_url = ""
             if client:
                 try:
                     client.storage.from_(settings.STORAGE_BUCKET_NAME).upload(
@@ -97,7 +97,8 @@ class StorageService:
                         file=contents,
                         file_options={"content-type": file.content_type or "application/octet-stream"}
                     )
-                    file_url = client.storage.from_(settings.STORAGE_BUCKET_NAME).get_public_url(storage_key)
+                    signed = client.storage.from_(settings.STORAGE_BUCKET_NAME).create_signed_url(storage_key, 3600)
+                    file_url = signed.get("signedURL") or signed.get("signedUrl") or ""
                 except Exception as e:
                     logger.warning(f"Supabase storage upload failed: {e}")
 
@@ -114,7 +115,7 @@ class StorageService:
             db.file_storage[storage_key] = encoded
 
             client = get_supabase_client()
-            file_url = f"https://supabase.co/storage/v1/object/public/{settings.STORAGE_BUCKET_NAME}/{storage_key}"
+            file_url = ""
             if client:
                 try:
                     client.storage.from_(settings.STORAGE_BUCKET_NAME).upload(
@@ -122,7 +123,8 @@ class StorageService:
                         file=encoded,
                         file_options={"content-type": "text/markdown"}
                     )
-                    file_url = client.storage.from_(settings.STORAGE_BUCKET_NAME).get_public_url(storage_key)
+                    signed = client.storage.from_(settings.STORAGE_BUCKET_NAME).create_signed_url(storage_key, 3600)
+                    file_url = signed.get("signedURL") or signed.get("signedUrl") or ""
                 except Exception as e:
                     logger.warning(f"Supabase storage upload text failed: {e}")
 
@@ -134,3 +136,20 @@ class StorageService:
                 code="VALIDATION_ERROR",
                 message="Either file or text_content must be provided.",
             )
+
+    @staticmethod
+    def get_submission_text(submission_id: str, filename: str, preview: Optional[str] = None) -> str:
+        storage_key = f"{submission_id}/{filename}"
+        contents = db.file_storage.get(storage_key)
+        if contents is None:
+            client = get_supabase_client()
+            if client:
+                try:
+                    contents = client.storage.from_(settings.STORAGE_BUCKET_NAME).download(storage_key)
+                except Exception as e:
+                    logger.warning(f"Supabase submission download failed: {e}")
+        if contents is None:
+            return preview or f"Student submission: {filename}"
+        if filename.lower().endswith(".pdf"):
+            return StorageService.extract_text_from_pdf(contents) or preview or f"Student submission: {filename}"
+        return contents.decode("utf-8", errors="replace")

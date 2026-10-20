@@ -5,8 +5,9 @@ from app.core.config import settings
 from app.core.logging import logger
 from app.models.common import JobStatus, ProcessingStep
 from app.models.job import GradingJob, JobProcessItemResult, BatchProcessResult
-from app.services.repository import Repository, db
+from app.services.repository import Repository
 from app.services.realtime import RealtimeService
+from app.services.storage import StorageService
 from app.ai.pipeline import run_evaluation_pipeline
 from app.ai.extract import RateLimitException
 
@@ -80,15 +81,7 @@ class QueueService:
                     raise Exception(f"Rubric {sub.rubricId} not found and no default available.")
 
                 # Retrieve raw content
-                storage_key = f"{sub.id}/{sub.fileName}"
-                raw_bytes = db.file_storage.get(storage_key)
-                if raw_bytes:
-                    try:
-                        raw_content = raw_bytes.decode("utf-8")
-                    except UnicodeDecodeError:
-                        raw_content = raw_bytes.decode("latin-1", errors="ignore")
-                else:
-                    raw_content = sub.contentPreview or f"Student submission: {sub.fileName}"
+                raw_content = StorageService.get_submission_text(sub.id, sub.fileName, sub.contentPreview)
 
                 # Update step to grading
                 sub.processingStep = ProcessingStep.GRADING
