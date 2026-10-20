@@ -10,7 +10,7 @@ import {
   RefreshCw,
 } from 'lucide-react';
 import { Course, Rubric, Submission } from '@/lib/types';
-import { getCourses, getRubrics, getSubmissions, subscribeToSubmissions } from '@/lib/storage';
+import { getCourses, getRubrics, getSubmissions, refreshRubrics, refreshSubmissions, subscribeToSubmissions } from '@/lib/storage';
 import { StudentUpload } from '@/components/StudentUpload';
 import { SubmissionCard } from '@/components/SubmissionCard';
 import { GradeDetailModal } from '@/components/GradeDetailModal';
@@ -26,10 +26,15 @@ export default function StudentPortalPage() {
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
-    setCourses(getCourses());
-    setRubrics(getRubrics());
-    setSubmissions(getSubmissions());
-    setMounted(true);
+    let active = true;
+    void (async () => {
+      try {
+        await refreshRubrics();
+        await refreshSubmissions();
+        if (active) { setCourses(getCourses()); setRubrics(getRubrics()); setSubmissions(getSubmissions()); }
+      } catch (error) { console.error(error); }
+      finally { if (active) setMounted(true); }
+    })();
 
     const unsubscribe = subscribeToSubmissions((updatedSubs) => {
       setSubmissions(updatedSubs);
@@ -37,7 +42,7 @@ export default function StudentPortalPage() {
       setSelectedSub((prev) => (prev ? updatedSubs.find((s) => s.id === prev.id) || prev : null));
     });
 
-    return () => unsubscribe();
+    return () => { active = false; unsubscribe(); };
   }, []);
 
   if (!mounted) {
@@ -51,10 +56,7 @@ export default function StudentPortalPage() {
     );
   }
 
-  // Filter submissions by current demo student
-  const studentSubs = submissions.filter((s) => s.studentId === '24CSE032' || s.studentEmail.includes('abhinav'));
-  // Or fallback to all submissions if none matched
-  const activeSubs = studentSubs.length > 0 ? studentSubs : submissions;
+  const activeSubs = submissions;
 
   const evaluatedCount = activeSubs.filter((s) => s.status === 'done').length;
   const inProgressCount = activeSubs.filter((s) => s.status === 'pending' || s.status === 'processing').length;
@@ -77,7 +79,7 @@ export default function StudentPortalPage() {
               <span>Smart Classroom</span>
             </div>
             <h1 className="text-2xl font-semibold tracking-tight text-slate-900 sm:text-3xl">
-              Welcome back, abhinav
+              Student workspace
             </h1>
             <p className="max-w-xl text-xs text-slate-500 sm:text-sm">
               Submit your assignment files (PDF or Markdown)
@@ -86,8 +88,7 @@ export default function StudentPortalPage() {
 
           <div className="space-y-1 rounded-md border border-slate-200 bg-slate-50 p-4 text-xs">
             <div className="font-semibold text-slate-800">Student Profile</div>
-            <div className="text-slate-500">ID: 24CSE032</div>
-            <div className="text-slate-500">Email: abhinav.sharma@university.ac.in</div>
+            <div className="text-slate-500">Your submissions are loaded from your signed-in account.</div>
             <div className="flex items-center gap-1 pt-2 text-[10px] text-slate-500">
               <span className="size-2 rounded-full bg-emerald-500"></span>
               <span>Realtime grading listener active</span>
@@ -158,7 +159,7 @@ export default function StudentPortalPage() {
               </p>
             </div>
             <button
-              onClick={() => setSubmissions(getSubmissions())}
+              onClick={() => void refreshSubmissions().catch((error) => console.error(error))}
               className="p-1.5 rounded-lg text-slate-500 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 transition"
               title="Refresh submissions list"
             >

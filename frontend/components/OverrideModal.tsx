@@ -63,7 +63,7 @@ export function OverrideModal({
     }
   };
 
-  const handleSave = (e: React.FormEvent) => {
+  const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!overrideReason.trim()) {
       setError('Please provide a brief justification or note for the override.');
@@ -84,10 +84,12 @@ export function OverrideModal({
       criterionAdjustments
     };
 
-    const updated = overrideGrade(submission.id, overrideData);
-    if (updated) {
+    try {
+      const updated = await overrideGrade(submission.id, overrideData);
       onOverrideSaved(updated);
       onClose();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not save grade override.');
     }
   };
 

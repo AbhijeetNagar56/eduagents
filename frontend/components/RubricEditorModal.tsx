@@ -10,7 +10,7 @@ interface RubricEditorModalProps {
   isOpen: boolean;
   onClose: () => void;
   initialRubric: Rubric | null;
-  onRubricSaved: (saved: Rubric) => void;
+  onRubricSaved: (saved: Rubric) => void | Promise<void>;
 }
 
 export function RubricEditorModal({
@@ -90,7 +90,7 @@ export function RubricEditorModal({
     setCriteria(updated);
   };
 
-  const handleSave = (e: React.FormEvent) => {
+  const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!assignmentTitle.trim()) {
       setError('Please provide an assignment title.');
@@ -111,9 +111,13 @@ export function RubricEditorModal({
       createdAt: initialRubric?.createdAt || new Date().toISOString().slice(0, 10)
     };
 
-    saveRubric(saved);
-    onRubricSaved(saved);
-    onClose();
+    try {
+      const persisted = await saveRubric(saved);
+      await onRubricSaved(persisted);
+      onClose();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not save rubric.');
+    }
   };
 
   return (

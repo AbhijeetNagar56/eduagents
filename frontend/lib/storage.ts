@@ -1,215 +1,111 @@
 'use client';
 
-import { INITIAL_COURSES, INITIAL_RUBRICS, INITIAL_SUBMISSIONS } from './mock-data';
+import { api } from './api';
+import { supabase } from './supabase';
 import { Course, FacultyOverride, Rubric, Submission } from './types';
-import { supabase, isSupabaseConfigured } from './supabase';
 
-const SUBMISSIONS_KEY = 'eduagents_submissions_v1';
-const RUBRICS_KEY = 'eduagents_rubrics_v1';
-const COURSES_KEY = 'eduagents_courses_v1';
+type Envelope<T> = { success: boolean; data: T; meta?: Record<string, number> };
+type Listener = (submissions: Submission[]) => void;
+const listeners = new Set<Listener>();
+let submissionsCache: Submission[] = [];
+let rubricsCache: Rubric[] = [];
+let coursesCache: Course[] = [];
+let currentQuery: { faculty?: boolean } = {};
+let realtimeStarted = false;
 
-// In-memory event listener for live state syncing across components
-type Listener<T> = (data: T) => void;
-const submissionListeners = new Set<Listener<Submission[]>>();
-
-function notifySubmissionListeners(subs: Submission[]) {
-  submissionListeners.forEach(listener => {
-    try {
-      listener(subs);
-    } catch (e) {
-      console.error('Error notifying listener:', e);
-    }
-  });
+function publish(submissions: Submission[]) {
+  submissionsCache = submissions;
+  listeners.forEach((listener) => listener(submissions));
 }
 
-export function subscribeToSubmissions(listener: Listener<Submission[]>): () => void {
-  submissionListeners.add(listener);
-  return () => {
-    submissionListeners.delete(listener);
+export function subscribeToSubmissions(listener: Listener) {
+  listeners.add(listener);
+  if (!realtimeStarted && supabase) {
+    realtimeStarted = true;
+    supabase.channel('eduagents-submissions')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'submissions_v2' }, () => {
+        void refreshSubmissions(currentQuery).catch((error) => console.error('Realtime refresh failed:', error));
+      }).subscribe();
+  }
+  return () => listeners.delete(listener);
+}
+
+export function getCourses() { return coursesCache; }
+export function getRubrics() { return rubricsCache; }
+export function getSubmissions() { return submissionsCache; }
+
+export async function refreshRubrics(courseCode?: string) {
+  const query = courseCode ? `?course_code=${encodeURIComponent(courseCode)}` : '';
+  const result = await api<Envelope<Rubric[]>>(`/api/v1/faculty/rubrics${query}`);
+  rubricsCache = result.data || [];
+  const groups = new Map<string, Rubric[]>();
+  for (const rubric of rubricsCache) groups.set(rubric.courseCode, [...(groups.get(rubric.courseCode) || []), rubric]);
+  coursesCache = [...groups].map(([code, items]) => ({
+    id: code,
+    code,
+    name: code,
+    instructor: '',
+    assignments: items.map((r) => ({ id: r.id, title: r.assignmentTitle, dueDate: '', rubricId: r.id })),
+  }));
+  return rubricsCache;
+}
+
+export async function refreshSubmissions(options: { faculty?: boolean; courseCode?: string; status?: string; search?: string } = {}) {
+  currentQuery = options;
+  const params = new URLSearchParams({ limit: '100' });
+  if (options.courseCode && options.courseCode !== 'ALL') params.set('course_code', options.courseCode);
+  if (options.status && options.status !== 'ALL') params.set('status', options.status);
+  if (options.search) params.set('search', options.search);
+  const path = options.faculty ? '/api/v1/faculty/submissions' : '/api/v1/submissions';
+  const result = await api<Envelope<Submission[]>>(`${path}?${params}`);
+  publish(result.data || []);
+  return submissionsCache;
+}
+
+export async function createSubmission(input: { file?: File; textContent?: string; studentId: string; studentName: string; studentEmail: string; assignmentId: string; assignmentTitle: string; courseCode: string; rubricId: string }) {
+  const body = new FormData();
+  if (input.file) body.set('file', input.file);
+  if (input.textContent) body.set('text_content', input.textContent);
+  body.set('student_id', input.studentId);
+  body.set('student_name', input.studentName);
+  body.set('student_email', input.studentEmail);
+  body.set('assignment_id', input.assignmentId);
+  body.set('assignment_title', input.assignmentTitle);
+  body.set('course_code', input.courseCode);
+  body.set('rubric_id', input.rubricId);
+  const result = await api<Envelope<Submission>>('/api/v1/submissions', { method: 'POST', body });
+  publish([result.data, ...submissionsCache.filter((s) => s.id !== result.data.id)]);
+  return result.data;
+}
+
+export async function saveRubric(rubric: Rubric) {
+  const payload = {
+    courseCode: rubric.courseCode,
+    assignmentTitle: rubric.assignmentTitle,
+    description: rubric.description,
+    totalPoints: rubric.totalPoints,
+    criteria: rubric.criteria.map(({ id, title, description, maxPoints, weightPercent }) => ({ id, title, description, maxPoints, weightPercent })),
   };
+  const result = rubricCacheHas(rubric.id)
+    ? await api<Envelope<Rubric>>(`/api/v1/faculty/rubrics/${encodeURIComponent(rubric.id)}`, { method: 'PUT', body: JSON.stringify(payload) })
+    : await api<Envelope<Rubric>>('/api/v1/faculty/rubrics', { method: 'POST', body: JSON.stringify(payload) });
+  await refreshRubrics();
+  return result.data;
 }
 
-export function getCourses(): Course[] {
-  if (typeof window === 'undefined') return INITIAL_COURSES;
-  const stored = localStorage.getItem(COURSES_KEY);
-  if (!stored) {
-    localStorage.setItem(COURSES_KEY, JSON.stringify(INITIAL_COURSES));
-    return INITIAL_COURSES;
-  }
-  try {
-    return JSON.parse(stored);
-  } catch {
-    return INITIAL_COURSES;
-  }
+function rubricCacheHas(id: string) { return rubricsCache.some((item) => item.id === id); }
+
+export async function deleteRubric(id: string) {
+  await api(`/api/v1/faculty/rubrics/${encodeURIComponent(id)}`, { method: 'DELETE' });
+  await refreshRubrics();
 }
 
-export function getRubrics(): Rubric[] {
-  if (typeof window === 'undefined') return INITIAL_RUBRICS;
-  const stored = localStorage.getItem(RUBRICS_KEY);
-  if (!stored) {
-    localStorage.setItem(RUBRICS_KEY, JSON.stringify(INITIAL_RUBRICS));
-    return INITIAL_RUBRICS;
-  }
-  try {
-    return JSON.parse(stored);
-  } catch {
-    return INITIAL_RUBRICS;
-  }
-}
-
-export function saveRubric(rubric: Rubric): Rubric {
-  const rubrics = getRubrics();
-  const index = rubrics.findIndex(r => r.id === rubric.id);
-  if (index >= 0) {
-    rubrics[index] = rubric;
-  } else {
-    rubrics.unshift(rubric);
-  }
-  if (typeof window !== 'undefined') {
-    localStorage.setItem(RUBRICS_KEY, JSON.stringify(rubrics));
-  }
-  return rubric;
-}
-
-export function deleteRubric(id: string): void {
-  const rubrics = getRubrics().filter(r => r.id !== id);
-  if (typeof window !== 'undefined') {
-    localStorage.setItem(RUBRICS_KEY, JSON.stringify(rubrics));
-  }
-}
-
-export function getSubmissions(): Submission[] {
-  if (typeof window === 'undefined') return INITIAL_SUBMISSIONS;
-  const stored = localStorage.getItem(SUBMISSIONS_KEY);
-  if (!stored) {
-    localStorage.setItem(SUBMISSIONS_KEY, JSON.stringify(INITIAL_SUBMISSIONS));
-    return INITIAL_SUBMISSIONS;
-  }
-  try {
-    return JSON.parse(stored);
-  } catch {
-    return INITIAL_SUBMISSIONS;
-  }
-}
-
-export function getSubmissionById(id: string): Submission | undefined {
-  return getSubmissions().find(s => s.id === id);
-}
-
-export function saveSubmission(submission: Submission): Submission {
-  const subs = getSubmissions();
-  const index = subs.findIndex(s => s.id === submission.id);
-  if (index >= 0) {
-    subs[index] = submission;
-  } else {
-    subs.unshift(submission);
-  }
-  if (typeof window !== 'undefined') {
-    localStorage.setItem(SUBMISSIONS_KEY, JSON.stringify(subs));
-  }
-  notifySubmissionListeners(subs);
-  return submission;
-}
-
-export function overrideGrade(submissionId: string, override: FacultyOverride): Submission | undefined {
-  const subs = getSubmissions();
-  const sub = subs.find(s => s.id === submissionId);
-  if (!sub) return undefined;
-
-  sub.override = override;
-  // If flagged, changing override clears flagged status to done
-  if (sub.status === 'flagged') {
-    sub.status = 'done';
-  }
-
-  saveSubmission(sub);
-  return sub;
-}
-
-export function resetToDemoDefaults(): void {
-  if (typeof window === 'undefined') return;
-  localStorage.setItem(SUBMISSIONS_KEY, JSON.stringify(INITIAL_SUBMISSIONS));
-  localStorage.setItem(RUBRICS_KEY, JSON.stringify(INITIAL_RUBRICS));
-  localStorage.setItem(COURSES_KEY, JSON.stringify(INITIAL_COURSES));
-  notifySubmissionListeners(INITIAL_SUBMISSIONS);
-}
-
-/**
- * Simulates the two-stage Gemini AI Grading Pipeline:
- * Step 1: Gemini Flash-Lite parses submission & extracts structure
- * Step 2: Gemini Flash evaluates against rubric criteria, computes score & feedback
- * Step 3: Writes grades to DB and pushes update
- */
-export function simulateAIGrading(submissionId: string, onUpdate?: (sub: Submission) => void): void {
-  const sub = getSubmissionById(submissionId);
-  if (!sub) return;
-
-  const rubrics = getRubrics();
-  const rubric = rubrics.find(r => r.id === sub.rubricId) || rubrics[0];
-
-  // Stage 1: Ingestion & Extraction (Flash-Lite)
-  sub.status = 'processing';
-  sub.processingStep = 'extracting';
-  saveSubmission(sub);
-  if (onUpdate) onUpdate(sub);
-
-  setTimeout(() => {
-    // Stage 2: Deep Pedagogical Grading (Flash)
-    const current = getSubmissionById(submissionId);
-    if (!current) return;
-    current.processingStep = 'grading';
-    saveSubmission(current);
-    if (onUpdate) onUpdate(current);
-
-    setTimeout(() => {
-      // Stage 3: Grading completed, generate realistic breakdown
-      const finalSub = getSubmissionById(submissionId);
-      if (!finalSub) return;
-
-      const criteria = rubric?.criteria || [];
-      const criteriaScores = criteria.map(c => {
-        // High quality score with slight random variance
-        const ratio = 0.8 + Math.random() * 0.18;
-        const scoreAwarded = Math.round(c.maxPoints * ratio);
-        return {
-          criterionId: c.id,
-          title: c.title,
-          scoreAwarded: Math.min(scoreAwarded, c.maxPoints),
-          maxPoints: c.maxPoints,
-          feedback: `Strong demonstration of ${c.title.toLowerCase()}. Clearly aligned with assignment requirements with minor optimization opportunities.`,
-          strengths: `Solid implementation of foundational concepts under ${c.title}.`,
-          improvements: `Consider adding additional edge case guards and asymptotic complexity proofs.`
-        };
-      });
-
-      const totalScore = criteriaScores.reduce((sum, c) => sum + c.scoreAwarded, 0);
-      const maxScore = criteria.reduce((sum, c) => sum + c.maxPoints, 0) || 100;
-      const percentage = Math.round((totalScore / maxScore) * 100);
-
-      finalSub.status = 'done';
-      finalSub.processingStep = 'synced';
-      finalSub.evaluation = {
-        score: totalScore,
-        maxScore,
-        percentage,
-        criteriaScores,
-        summaryFeedback: `Assignment evaluated successfully by Gemini 2-Step Agentic Pipeline. Demonstrates solid technical execution, comprehensive analysis, and adherence to rubric standards.`,
-        strengths: [
-          'Thorough coverage of primary algorithmic / analytical criteria',
-          'Clean presentation with well-structured document hierarchy',
-          'Accurate baseline implementations satisfying test constraints'
-        ],
-        improvements: [
-          'Provide more rigorous theoretical bounds for worst-case conditions',
-          'Expand on empirical performance visualizations under high data scale'
-        ],
-        aiModelExtraction: 'Gemini Flash-Lite',
-        aiModelGrading: 'Gemini Flash',
-        evaluatedAt: new Date().toISOString().replace('T', ' ').substring(0, 16)
-      };
-
-      saveSubmission(finalSub);
-      if (onUpdate) onUpdate(finalSub);
-    }, 2800);
-  }, 2200);
+export async function overrideGrade(submissionId: string, override: FacultyOverride) {
+  await api(`/api/v1/faculty/submissions/${encodeURIComponent(submissionId)}/override`, {
+    method: 'POST',
+    body: JSON.stringify({ overriddenScore: override.overriddenScore, overriddenBy: override.overriddenBy, overrideReason: override.overrideReason, criterionAdjustments: override.criterionAdjustments }),
+  });
+  const updated = (await api<Envelope<Submission>>(`/api/v1/submissions/${encodeURIComponent(submissionId)}`)).data;
+  publish(submissionsCache.map((s) => s.id === updated.id ? updated : s));
+  return updated;
 }

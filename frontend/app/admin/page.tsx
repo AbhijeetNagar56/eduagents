@@ -18,7 +18,7 @@ import {
   Download
 } from 'lucide-react';
 import { Course, Rubric, Submission } from '@/lib/types';
-import { getCourses, getRubrics, getSubmissions, subscribeToSubmissions } from '@/lib/storage';
+import { getCourses, getRubrics, getSubmissions, refreshRubrics, refreshSubmissions, subscribeToSubmissions } from '@/lib/storage';
 import { getScoreColor } from '@/lib/utils';
 import { StatusBadge } from '@/components/Badge';
 import { StatCard } from '@/components/StatCard';
@@ -33,17 +33,17 @@ export default function HomePage() {
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
-    setSubmissions(getSubmissions());
-    setRubrics(getRubrics());
-    setCourses(getCourses());
-    setMounted(true);
+    let active = true;
+    void Promise.all([refreshSubmissions({ faculty: true }), refreshRubrics()]).then(() => {
+      if (active) { setSubmissions(getSubmissions()); setRubrics(getRubrics()); setCourses(getCourses()); }
+    }).catch(console.error).finally(() => { if (active) setMounted(true); });
 
     const unsubscribe = subscribeToSubmissions((updated) => {
       setSubmissions(updated);
       setSelectedSub((prev) => (prev ? updated.find((s) => s.id === prev.id) || prev : null));
     });
 
-    return () => unsubscribe();
+    return () => { active = false; unsubscribe(); };
   }, []);
 
   if (!mounted) {
