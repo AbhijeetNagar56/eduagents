@@ -3,6 +3,7 @@
 import { useState, type FormEvent } from 'react'
 import { useRouter } from 'next/navigation'
 import { BookOpen, GraduationCap, ShieldCheck, Users } from 'lucide-react'
+import { supabase, isSupabaseConfigured } from '@/lib/supabase'
 
 const portals = [
   { id: 'student', label: 'Student', icon: GraduationCap },
@@ -15,9 +16,28 @@ type Portal = (typeof portals)[number]['id']
 export default function LoginPage() {
   const router = useRouter()
   const [selectedPortal, setSelectedPortal] = useState<Portal>('student')
+  const [error, setError] = useState('')
+  const [busy, setBusy] = useState(false)
 
-  const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
+  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
+    setError('')
+    if (!isSupabaseConfigured || !supabase) {
+      setError('Configure NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY to enable sign-in.')
+      return
+    }
+    setBusy(true)
+    const form = new FormData(event.currentTarget)
+    const { error: authError } = await supabase.auth.signInWithPassword({ email: String(form.get('email')), password: String(form.get('password')) })
+    setBusy(false)
+    if (authError) { setError(authError.message); return }
+    const { data: { user } } = await supabase.auth.getUser()
+    const role = user?.app_metadata?.role || 'student'
+    if (role !== selectedPortal && !(selectedPortal === 'faculty' && role === 'admin')) {
+      await supabase.auth.signOut()
+      setError(`This account has the ${role} role. Select the matching portal.`)
+      return
+    }
     router.push(`/${selectedPortal}`)
   }
 
@@ -68,17 +88,17 @@ export default function LoginPage() {
             </fieldset>
 
             <div>
-              <label htmlFor="username" className="mb-1.5 block text-sm font-medium text-slate-700">
-                Username
+              <label htmlFor="email" className="mb-1.5 block text-sm font-medium text-slate-700">
+                Email
               </label>
               <input
-                id="username"
-                name="username"
-                type="text"
-                autoComplete="username"
+                id="email"
+                name="email"
+                type="email"
+                autoComplete="email"
                 required
                 className="w-full rounded-md border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-teal-700 focus:ring-2 focus:ring-teal-700/15"
-                placeholder="Your username"
+                placeholder="you@university.edu"
               />
             </div>
 
@@ -97,14 +117,15 @@ export default function LoginPage() {
               />
             </div>
 
+            {error && <p role="alert" className="text-sm text-rose-700">{error}</p>}
             <button
               type="submit"
               className="w-full rounded-md bg-teal-800 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-teal-900 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-800"
             >
-              Continue
+              {busy ? 'Signing in…' : 'Sign in'}
             </button>
           </form>
-          <p className="mt-4 text-center text-xs text-slate-400">Demo access · credentials are not verified</p>
+          <p className="mt-4 text-center text-xs text-slate-400">Use your EduAgents Supabase account.</p>
         </section>
       </div>
     </main>

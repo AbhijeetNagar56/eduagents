@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   UploadCloud,
   FileCode,
@@ -12,7 +12,8 @@ import {
   Info
 } from 'lucide-react';
 import { Course, Rubric, Submission } from '../lib/types';
-import { saveSubmission, simulateAIGrading } from '../lib/storage';
+import { createSubmission } from '../lib/storage';
+import { getSessionUser } from '../lib/api';
 
 interface StudentUploadProps {
   courses: Course[];
@@ -37,15 +38,25 @@ export function StudentUpload({
   const selectedAssign = selectedCourse?.assignments.find(a => a.id === selectedAssignId) || selectedCourse?.assignments[0];
   const activeRubric = rubrics.find(r => r.id === selectedAssign?.rubricId) || rubrics[0];
 
-  const [studentName, setStudentName] = useState('Jordan Taylor');
-  const [studentId, setStudentId] = useState('STU-2024-302');
-  const [studentEmail, setStudentEmail] = useState('jordan.taylor@university.edu');
+  const [studentName, setStudentName] = useState('');
+  const [studentId, setStudentId] = useState('');
+  const [studentEmail, setStudentEmail] = useState('');
 
   const [uploadMode, setUploadMode] = useState<'file' | 'text'>('file');
   const [file, setFile] = useState<File | null>(null);
   const [textContent, setTextContent] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState('');
+
+  useEffect(() => {
+    void getSessionUser().then((user) => {
+      if (!user) return;
+      const metadata = user.user_metadata || {};
+      setStudentEmail(user.email || '');
+      setStudentName(metadata.full_name || metadata.name || '');
+      setStudentId(metadata.student_id || user.id);
+    }).catch(console.error);
+  }, []);
 
   const handleFileDrop = (e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault();
@@ -62,7 +73,7 @@ export function StudentUpload({
     }
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
 
@@ -78,48 +89,22 @@ export function StudentUpload({
 
     setIsSubmitting(true);
 
-    const fileName = uploadMode === 'file' && file
-      ? file.name
-      : `${studentName.toLowerCase().replace(/\s+/g, '_')}_submission.md`;
-
-    const fileSize = uploadMode === 'file' && file
-      ? `${(file.size / 1024).toFixed(1)} KB`
-      : `${(new Blob([textContent]).size / 1024).toFixed(1)} KB`;
-
-    const fileType = fileName.endsWith('.pdf') ? 'pdf' : 'markdown';
-
-    const newSub: Submission = {
-      id: `sub-${Date.now().toString().slice(-4)}`,
-      studentId: studentId.trim(),
-      studentName: studentName.trim(),
-      studentEmail: studentEmail.trim(),
-      assignmentId: selectedAssign?.id || 'assign-custom',
-      assignmentTitle: selectedAssign?.title || 'Custom Assignment',
-      courseCode: selectedCourse?.code || 'CS101',
-      fileName,
-      fileSize,
-      fileType,
-      status: 'pending',
-      processingStep: 'queued',
-      submittedAt: new Date().toISOString().replace('T', ' ').substring(0, 16),
-      rubricId: activeRubric?.id || 'rubric-1',
-      contentPreview: uploadMode === 'text'
-        ? textContent.substring(0, 300)
-        : `Uploaded document: ${fileName} for ${selectedAssign?.title}. Awaiting Gemini extraction.`
-    };
-
-    saveSubmission(newSub);
-    onSubmissionCreated(newSub);
-
-    // Trigger AI pipeline in background
-    simulateAIGrading(newSub.id, (updated) => {
-      onSubmissionCreated(updated);
-    });
-
-    // Reset upload form
-    setFile(null);
-    setTextContent('');
-    setIsSubmitting(false);
+    try {
+      const newSub = await createSubmission({
+        file: uploadMode === 'file' ? file ?? undefined : undefined,
+        textContent: uploadMode === 'text' ? textContent : undefined,
+        studentId: studentId.trim(), studentName: studentName.trim(), studentEmail: studentEmail.trim(),
+        assignmentId: selectedAssign?.id || '', assignmentTitle: selectedAssign?.title || '',
+        courseCode: selectedCourse?.code || '', rubricId: activeRubric?.id || '',
+      });
+      onSubmissionCreated(newSub);
+      setFile(null);
+      setTextContent('');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Submission failed. Please try again.');
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
@@ -269,7 +254,7 @@ export function StudentUpload({
               <input
                 id="file-upload-input"
                 type="file"
-                accept=".pdf,.md,.txt,.py"
+                accept=".pdf,.md,.txt"
                 className="hidden"
                 onChange={handleFileInput}
               />

@@ -14,7 +14,7 @@ import {
   Clock
 } from 'lucide-react';
 import { Course, Rubric } from '@/lib/types';
-import { getCourses, getRubrics, saveRubric, deleteRubric } from '@/lib/storage';
+import { getCourses, getRubrics, refreshRubrics, deleteRubric } from '@/lib/storage';
 import { RubricEditorModal } from '@/components/RubricEditorModal';
 import { RubricViewerModal } from '@/components/RubricViewerModal';
 
@@ -28,9 +28,7 @@ export default function FacultyRubricsPage() {
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
-    setRubrics(getRubrics());
-    setCourses(getCourses());
-    setMounted(true);
+    void refreshRubrics().then(() => { setRubrics(getRubrics()); setCourses(getCourses()); }).catch(console.error).finally(() => setMounted(true));
   }, []);
 
   if (!mounted) {
@@ -59,15 +57,16 @@ export default function FacultyRubricsPage() {
     setIsEditorOpen(true);
   };
 
-  const handleDelete = (id: string) => {
+  const handleDelete = async (id: string) => {
     if (confirm('Are you sure you want to delete this rubric? Existing submissions using it will keep their evaluation snapshot.')) {
-      deleteRubric(id);
-      setRubrics(getRubrics());
+      try { await deleteRubric(id); setRubrics(getRubrics()); }
+      catch (error) { alert(error instanceof Error ? error.message : 'Could not delete rubric.'); }
     }
   };
 
-  const handleSave = (saved: Rubric) => {
+  const handleSave = async (saved: Rubric) => {
     setRubrics(getRubrics());
+    setCourses(getCourses());
     setIsEditorOpen(false);
   };
 

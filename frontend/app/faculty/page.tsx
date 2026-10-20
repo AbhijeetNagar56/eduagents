@@ -19,7 +19,8 @@ import {
   Sparkles
 } from 'lucide-react';
 import { Course, Rubric, Submission } from '@/lib/types';
-import { getCourses, getRubrics, getSubmissions, saveSubmission, simulateAIGrading, subscribeToSubmissions } from '@/lib/storage';
+import { getCourses, getRubrics, getSubmissions, refreshRubrics, refreshSubmissions, subscribeToSubmissions } from '@/lib/storage';
+import { api } from '@/lib/api';
 import { exportSubmissionsToCSV, downloadJSON, getScoreColor } from '@/lib/utils';
 import { StatCard } from '@/components/StatCard';
 import { StatusBadge } from '@/components/Badge';
@@ -41,10 +42,14 @@ export default function FacultyDashboardPage() {
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
-    setCourses(getCourses());
-    setRubrics(getRubrics());
-    setSubmissions(getSubmissions());
-    setMounted(true);
+    let active = true;
+    void (async () => {
+      try {
+        await Promise.all([refreshRubrics(), refreshSubmissions({ faculty: true })]);
+        if (active) { setCourses(getCourses()); setRubrics(getRubrics()); setSubmissions(getSubmissions()); }
+      } catch (error) { console.error(error); }
+      finally { if (active) setMounted(true); }
+    })();
 
     const unsubscribe = subscribeToSubmissions((updatedSubs) => {
       setSubmissions(updatedSubs);
@@ -52,7 +57,7 @@ export default function FacultyDashboardPage() {
       setSelectedSubForOverride((prev) => (prev ? updatedSubs.find((s) => s.id === prev.id) || prev : null));
     });
 
-    return () => unsubscribe();
+    return () => { active = false; unsubscribe(); };
   }, []);
 
   if (!mounted) {
@@ -101,21 +106,11 @@ export default function FacultyDashboardPage() {
     : 0;
 
   // Process all pending jobs simulate cron POST /internal/process-jobs
-  const handleProcessPendingJobs = () => {
-    const pendingList = submissions.filter((s) => s.status === 'pending');
-    if (pendingList.length === 0) {
-      alert('No pending submissions in the queue.');
-      return;
-    }
+  const handleProcessPendingJobs = async () => {
     setIsProcessingBatch(true);
-    pendingList.forEach((sub, index) => {
-      setTimeout(() => {
-        simulateAIGrading(sub.id);
-        if (index === pendingList.length - 1) {
-          setTimeout(() => setIsProcessingBatch(false), 3000);
-        }
-      }, index * 800);
-    });
+    try { await api('/api/v1/faculty/process-jobs', { method: 'POST' }); await refreshSubmissions({ faculty: true }); }
+    catch (error) { alert(error instanceof Error ? error.message : 'Queue processing failed.'); }
+    finally { setIsProcessingBatch(false); }
   };
 
   const handleExportCSV = () => {
