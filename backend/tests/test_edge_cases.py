@@ -27,35 +27,35 @@ def test_file_size_exceeds_limit(client):
     assert res_json["error"]["code"] == "PAYLOAD_TOO_LARGE"
 
 
-def test_faculty_submissions_filtering(client):
+def test_faculty_submissions_filtering(faculty_client):
     # Filter by course CS101
-    res_cs101 = client.get("/api/v1/faculty/submissions?course_code=CS101")
+    res_cs101 = faculty_client.get("/api/v1/faculty/submissions?course_code=CS101")
     assert res_cs101.status_code == 200
     for sub in res_cs101.json()["data"]:
         assert sub["courseCode"] == "CS101"
 
     # Filter by status done
-    res_done = client.get("/api/v1/faculty/submissions?status=done")
+    res_done = faculty_client.get("/api/v1/faculty/submissions?status=done")
     assert res_done.status_code == 200
     for sub in res_done.json()["data"]:
         assert sub["status"] == "done"
 
     # Filter by status overridden
-    res_overridden = client.get("/api/v1/faculty/submissions?status=overridden")
+    res_overridden = faculty_client.get("/api/v1/faculty/submissions?status=overridden")
     assert res_overridden.status_code == 200
     for sub in res_overridden.json()["data"]:
         assert sub["override"] is not None
         assert sub["override"]["isOverridden"] is True
 
     # Search filter
-    res_search = client.get("/api/v1/faculty/submissions?search=Rivera")
+    res_search = faculty_client.get("/api/v1/faculty/submissions?search=Rivera")
     assert res_search.status_code == 200
     assert len(res_search.json()["data"]) >= 1
     assert "Rivera" in res_search.json()["data"][0]["studentName"]
 
 
-def test_rubrics_filter_by_course(client):
-    res = client.get("/api/v1/faculty/rubrics?course_code=AI301")
+def test_rubrics_filter_by_course(faculty_client):
+    res = faculty_client.get("/api/v1/faculty/rubrics?course_code=AI301")
     assert res.status_code == 200
     data = res.json()["data"]
     assert len(data) >= 1

@@ -12,7 +12,14 @@ import { useRouter } from 'next/navigation';
 export function Navbar() {
   const pathname = usePathname();
   const router = useRouter();
-  const handleSignOut = async () => { await supabase?.auth.signOut(); router.push('/'); };
+  const handleSignOut = async () => {
+    if (typeof window !== 'undefined') {
+      localStorage.removeItem('eduagents_auth_token');
+      localStorage.removeItem('eduagents_role');
+    }
+    await supabase?.auth.signOut();
+    router.push('/');
+  };
 
   const navLinks = [
     { href: '/', label: 'Overview' },

@@ -20,3 +20,19 @@ def client():
     settings.INTERNAL_CRON_SECRET = "test-cron-secret-123"
     with TestClient(app) as test_client:
         yield test_client
+
+
+@pytest.fixture
+def faculty_client():
+    settings.ENVIRONMENT = "development"
+    settings.INTERNAL_CRON_SECRET = "test-cron-secret-123"
+    with TestClient(app, headers={"Authorization": "Bearer dev-faculty"}) as test_client:
+        yield test_client
+
+
+@pytest.fixture
+def student_client():
+    settings.ENVIRONMENT = "development"
+    settings.INTERNAL_CRON_SECRET = "test-cron-secret-123"
+    with TestClient(app, headers={"Authorization": "Bearer dev-student"}) as test_client:
+        yield test_client

@@ -14,7 +14,14 @@ export class ApiError extends Error {
 export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
   const { data: { session } } = supabase ? await supabase.auth.getSession() : { data: { session: null } };
   const headers = new Headers(init.headers);
-  if (session?.access_token) headers.set('Authorization', `Bearer ${session.access_token}`);
+  if (session?.access_token) {
+    headers.set('Authorization', `Bearer ${session.access_token}`);
+  } else if (typeof window !== 'undefined') {
+    const localToken = localStorage.getItem('eduagents_auth_token');
+    if (localToken) {
+      headers.set('Authorization', `Bearer ${localToken}`);
+    }
+  }
   if (init.body && !(init.body instanceof FormData)) headers.set('Content-Type', 'application/json');
   let response: Response;
   try {

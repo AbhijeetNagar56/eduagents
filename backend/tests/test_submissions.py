@@ -72,9 +72,9 @@ def test_list_student_submissions(client):
     assert isinstance(res_json["data"], list)
 
 
-def test_get_submission_detail(client):
+def test_get_submission_detail(faculty_client):
     # Retrieve existing seed submission
-    response = client.get("/api/v1/submissions/sub-101")
+    response = faculty_client.get("/api/v1/submissions/sub-101")
     assert response.status_code == 200
     res_json = response.json()
     assert res_json["success"] is True

@@ -54,8 +54,8 @@ async def get_current_user(
 
     # Fast path for local development / testing tokens
     if settings.ENVIRONMENT == "development" and (token.startswith("mock-") or token.startswith("dev-")):
-        role = "faculty" if "faculty" in token else "student"
-        user_id = "FAC-101" if role == "faculty" else "STU-2024-302"
+        role = "admin" if "admin" in token else ("faculty" if "faculty" in token else "student")
+        user_id = "ADM-001" if role == "admin" else ("FAC-101" if role == "faculty" else "STU-2024-302")
         email = f"{role}@eduagents.app"
         return AuthUser(id=user_id, email=email, role=role)
 
@@ -67,7 +67,7 @@ async def get_current_user(
             if not auth_user:
                 raise ValueError("Supabase returned no user for this token")
             metadata = auth_user.app_metadata or {}
-            role = metadata.get("role") or "student"
+            role = metadata.get("role") or (auth_user.user_metadata or {}).get("role") or "student"
             return AuthUser(id=str(auth_user.id), email=auth_user.email or "", role=role)
         except Exception as e:
             logger.warning(f"Supabase access-token verification failed: {e}")
